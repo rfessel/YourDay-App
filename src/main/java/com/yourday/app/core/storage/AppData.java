@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.yourday.app.core.model.AppConfig;
 import com.yourday.app.core.model.EventItem;
+import com.yourday.app.core.model.Lista;
 import com.yourday.app.core.model.TodoItem;
 
 import java.io.IOException;
@@ -24,6 +25,7 @@ public class AppData {
 
     private static final String EVENTS_JSON = "events.json";
     private static final String TODOS_JSON = "todos.json";
+    private static final String LISTS_JSON = "lists.json";
     private static final String CONFIG_JSON = "config.json";
     private static final String BACKUP_JSON = "yourday-backup.json";
 
@@ -85,6 +87,18 @@ public class AppData {
         }
     }
 
+    public List<Lista> loadLists() {
+        synchronized (lock) {
+            return readList(LISTS_JSON, Lista[].class);
+        }
+    }
+
+    public void saveLists(List<Lista> lists) {
+        synchronized (lock) {
+            writeAtomic(LISTS_JSON, lists);
+        }
+    }
+
     public AppConfig loadConfig() {
         synchronized (lock) {
             Path p = dir.resolve(CONFIG_JSON);
@@ -113,6 +127,7 @@ public class AppData {
             Backup bundle = new Backup();
             bundle.events = loadEventsNoLock();
             bundle.todos = loadTodosNoLock();
+            bundle.lists = loadListsNoLock();
             bundle.config = loadConfigNoLock();
             Path tmp = out.resolveSibling(out.getFileName() + ".tmp");
             try (Writer w = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
@@ -137,6 +152,9 @@ public class AppData {
             }
             if (bundle.todos != null) {
                 saveTodosNoLock(bundle.todos);
+            }
+            if (bundle.lists != null) {
+                saveListsNoLock(bundle.lists);
             }
             if (bundle.config != null) {
                 saveConfigNoLock(bundle.config);
@@ -187,6 +205,10 @@ public class AppData {
         return readList(TODOS_JSON, TodoItem[].class);
     }
 
+    private List<Lista> loadListsNoLock() {
+        return readList(LISTS_JSON, Lista[].class);
+    }
+
     private AppConfig loadConfigNoLock() {
         Path p = dir.resolve(CONFIG_JSON);
         if (Files.exists(p)) {
@@ -209,6 +231,10 @@ public class AppData {
         writeAtomic(TODOS_JSON, todos);
     }
 
+    private void saveListsNoLock(List<Lista> lists) {
+        writeAtomic(LISTS_JSON, lists);
+    }
+
     private void saveConfigNoLock(AppConfig config) {
         writeAtomic(CONFIG_JSON, config);
     }
@@ -216,6 +242,7 @@ public class AppData {
     private static class Backup {
         List<EventItem> events;
         List<TodoItem> todos;
+        List<Lista> lists;
         AppConfig config;
     }
 }

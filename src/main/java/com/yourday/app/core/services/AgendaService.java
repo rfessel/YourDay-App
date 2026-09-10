@@ -4,6 +4,8 @@ import com.yourday.app.core.ics.Ics;
 import com.yourday.app.core.ics.Recurrence;
 import com.yourday.app.core.model.AppConfig;
 import com.yourday.app.core.model.EventItem;
+import com.yourday.app.core.model.Lista;
+import com.yourday.app.core.model.ListaItem;
 import com.yourday.app.core.model.TodoItem;
 import com.yourday.app.core.storage.AppData;
 
@@ -135,6 +137,56 @@ public class AgendaService {
         data.saveTodos(data.loadTodos().stream()
                 .filter(t -> !t.id.equals(id))
                 .toList());
+    }
+
+    // ---------------- Listas ----------------
+
+    public synchronized List<Lista> lists() {
+        return data.loadLists();
+    }
+
+    public synchronized void addList(String name) {
+        List<Lista> lists = new ArrayList<>(lists());
+        lists.add(Lista.of(name));
+        data.saveLists(lists);
+    }
+
+    public synchronized void removeList(String id) {
+        data.saveLists(lists().stream()
+                .filter(l -> !l.id.equals(id))
+                .toList());
+    }
+
+    public synchronized void setListDone(String id, boolean done) {
+        data.saveLists(mapList(id, l -> l.done = done));
+    }
+
+    public synchronized void addListItem(String listId, String text) {
+        data.saveLists(mapList(listId, l -> l.items.add(ListaItem.of(text))));
+    }
+
+    public synchronized void removeListItem(String listId, String itemId) {
+        data.saveLists(mapList(listId,
+                l -> l.items.removeIf(i -> i.id.equals(itemId))));
+    }
+
+    public synchronized void toggleListItem(String listId, String itemId) {
+        data.saveLists(mapList(listId, l -> l.items.stream()
+                .filter(i -> i.id.equals(itemId))
+                .forEach(i -> i.done = !i.done)));
+    }
+
+    /** Aplica um efeito a uma lista e persiste a lista completa. */
+    private List<Lista> mapList(String id, java.util.function.Consumer<Lista> effect) {
+        List<Lista> lists = new ArrayList<>(lists());
+        for (Lista l : lists) {
+            if (l.id.equals(id)) {
+                effect.accept(l);
+                break;
+            }
+        }
+        data.saveLists(lists);
+        return lists;
     }
 
     // ---------------- helpers ----------------

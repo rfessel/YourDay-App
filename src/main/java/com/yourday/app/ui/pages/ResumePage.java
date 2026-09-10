@@ -30,10 +30,9 @@ import static com.yourday.app.core.services.AgendaService.startOfDay;
 public class ResumePage extends VBox implements MainView.Refreshable {
 
     private final UiContext ctx;
-    private final VBox weatherBox = new VBox(6);
+    private final VBox weatherHeader = new VBox(2);
     private final VBox eventsBox = new VBox(8);
     private final VBox todosBox = new VBox(8);
-    private final Label weatherStatus = new Label();
     private long lastWeatherFetch;
 
     public ResumePage(UiContext ctx) {
@@ -42,23 +41,34 @@ public class ResumePage extends VBox implements MainView.Refreshable {
         getStyleClass().add("content");
 
         LocalDate today = AgendaService.today();
-        Label title = new Label("Resumo · " + Ui.weekdayFull(today)
-                + ", " + today.getDayOfMonth() + " de " + Ui.monthName(today));
-        title.getStyleClass().add("page-title");
 
-        Label sub = new Label("Seu dia em um relance");
-        sub.getStyleClass().add("section-label");
+        String user = System.getProperty("user.name", "");
+        if (user.isEmpty()) {
+            user = "você";
+        } else {
+            user = user.substring(0, 1).toUpperCase() + user.substring(1);
+        }
+        Label hello = new Label(greeting() + ", " + user);
+        hello.getStyleClass().add("page-title");
+
+        Label dateLbl = new Label(Ui.weekdayFull(today)
+                + ", " + today.getDayOfMonth() + " de " + Ui.monthName(today));
+        dateLbl.getStyleClass().add("section-label");
 
         Button refresh = new Button("↻");
         refresh.getStyleClass().add("toolbtn");
         refresh.setOnAction(e -> doRefresh());
 
-        HBox header = new HBox(10, new VBox(2, title, sub), refresh);
-        header.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(header, Priority.ALWAYS);
+        VBox helloBox = new VBox(2, hello, dateLbl);
 
-        weatherBox.setSpacing(8);
-        weatherBox.getChildren().add(Ui.card(Ui.sectionTitle("Clima agora"), weatherStatus));
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        weatherHeader.setAlignment(Pos.CENTER_RIGHT);
+        weatherHeader.getChildren().add(rightMuted("Carregando clima…"));
+
+        HBox header = new HBox(10, helloBox, refresh, spacer, weatherHeader);
+        header.setAlignment(Pos.CENTER_LEFT);
 
         eventsBox.setSpacing(8);
         eventsBox.getChildren().add(Ui.card(Ui.sectionTitle("Próximos compromissos"), new Label("carregando…")));
@@ -66,8 +76,26 @@ public class ResumePage extends VBox implements MainView.Refreshable {
         todosBox.setSpacing(8);
         todosBox.getChildren().add(Ui.card(Ui.sectionTitle("Tarefas de hoje"), new Label("carregando…")));
 
-        getChildren().addAll(header, weatherBox, eventsBox, todosBox);
+        getChildren().addAll(header, eventsBox, todosBox);
         refresh();
+    }
+
+    private static String greeting() {
+        int h = LocalDateTime.now().getHour();
+        if (h >= 5 && h < 12) {
+            return "Bom dia";
+        }
+        if (h >= 12 && h < 18) {
+            return "Boa tarde";
+        }
+        return "Boa noite";
+    }
+
+    private Label rightMuted(String text) {
+        Label l = new Label(text);
+        l.getStyleClass().add("updated-label");
+        l.setAlignment(Pos.CENTER_RIGHT);
+        return l;
     }
 
     @Override
@@ -165,16 +193,16 @@ public class ResumePage extends VBox implements MainView.Refreshable {
     }
 
     private void fetchWeather() {
-        weatherStatus.setText("Carregando clima…");
+        weatherHeader.getChildren().setAll(rightMuted("Carregando clima…"));
         String city = ctx.agenda().config().cityName;
         double lat = ctx.agenda().config().cityLat == null ? -23.5475 : ctx.agenda().config().cityLat;
         double lon = ctx.agenda().config().cityLon == null ? -46.6361 : ctx.agenda().config().cityLon;
         var cfg = ctx.agenda().config();
-        var agenda = ctx.agenda();
         com.yourday.app.core.services.HttpSupport.getAsync(
                 "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
                         + "&current=temperature_2m,weather_code,apparent_temperature,relative_humidity_2m,wind_speed_10m,is_day"
-                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1",
+                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+                        + "&timezone=auto&forecast_days=1",
                 s -> {
                     WeatherData w = new WeatherData();
                     try {
@@ -185,46 +213,60 @@ public class ResumePage extends VBox implements MainView.Refreshable {
                         w.now.feelsLike = cur.get("apparent_temperature").getAsDouble();
                         w.now.humidity = cur.get("relative_humidity_2m").getAsInt();
                         w.now.windKmh = cur.get("wind_speed_10m").getAsDouble();
+
                         var daily = root.getAsJsonObject("daily");
-                        w.now.precipitation = 0;
-                        w.cityName = cfg.cityName;
+                        WeatherData.Day day = new WeatherData.Day();
+                        day.date = AgendaService.today();
+                        day.max = daily.get("temperature_2m_max").getAsJsonArray().get(0).getAsDouble();
+                        day.min = daily.get("temperature_2m_min").getAsJsonArray().get(0).getAsDouble();
+                        day.code = daily.get("weather_code").getAsJsonArray().get(0).getAsInt();
+                        day.precipProb = daily.has("precipitation_probability_max")
+                                && !daily.get("precipitation_probability_max").isJsonNull()
+                                ? daily.get("precipitation_probability_max").getAsJsonArray().get(0).getAsInt() : -1;
+                        w.days.add(day);
+
+                        w.cityName = cfg.cityName == null ? WeatherData.FALLBACK_CITY : cfg.cityName;
                         w.fetchedAt = System.currentTimeMillis();
                         Platform.runLater(() -> showWeather(w));
                     } catch (Exception ex) {
-                        Platform.runLater(() -> weatherStatus.setText("Erro ao carregar o clima."));
+                        Platform.runLater(() -> weatherHeader.getChildren()
+                                .setAll(rightMuted("Erro ao carregar o clima.")));
                     }
                 },
-                e -> Platform.runLater(() -> weatherStatus.setText("Erro ao carregar o clima: " + e.getMessage())));
+                e -> Platform.runLater(() -> weatherHeader.getChildren()
+                        .setAll(rightMuted("Erro ao carregar o clima: " + e.getMessage()))));
         lastWeatherFetch = System.currentTimeMillis();
     }
 
     private void showWeather(WeatherData w) {
-        HBox row = new HBox(16);
-        row.setAlignment(Pos.CENTER_LEFT);
+        HBox line1 = new HBox(6);
+        line1.setAlignment(Pos.CENTER_RIGHT);
 
+        Label city = new Label(w.cityName);
+        city.getStyleClass().add("weather-city");
         Label icon = new Label(WeatherData.icon(w.now.code));
-        icon.getStyleClass().add("weather-icon-big");
+        icon.getStyleClass().add("weather-icon");
+        Label temp = new Label(Math.round(w.now.temp) + "°C");
+        temp.getStyleClass().add("weather-temp");
 
-        VBox info = new VBox(2);
-        Label temp = new Label(Math.round(w.now.temp) + "°");
-        temp.getStyleClass().add("weather-now");
-        Label cond = new Label(WeatherData.condition(w.now.code));
-        cond.getStyleClass().add("weather-cond");
-        Label meta = new Label(String.format("%s · sensação %.0f° · %d%% umid. · %.0f km/h",
-                w.cityName, w.now.feelsLike, w.now.humidity, w.now.windKmh));
-        meta.getStyleClass().add("section-label");
-        info.getChildren().addAll(temp, cond, meta);
+        line1.getChildren().addAll(city, icon, temp);
 
-        String dt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
-        Label updated = new Label("Atualizado às " + dt);
-        updated.getStyleClass().add("updated-label");
+        VBox block = new VBox(2);
+        block.setAlignment(Pos.CENTER_RIGHT);
+        block.getChildren().add(line1);
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        row.getChildren().addAll(icon, info, spacer);
-
-        weatherStatus.setText("");
-        weatherBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Clima agora"), row, updated));
+        if (!w.days.isEmpty()) {
+            WeatherData.Day d = w.days.get(0);
+            String s = String.format("Max %.0f°  Min %.0f°", d.max, d.min);
+            if (d.precipProb >= 0) {
+                s += "    ·    Chuva " + d.precipProb + "%";
+            }
+            Label meta = new Label(s);
+            meta.getStyleClass().add("updated-label");
+            meta.setAlignment(Pos.CENTER_RIGHT);
+            block.getChildren().add(meta);
+        }
+        weatherHeader.getChildren().setAll(block);
     }
 }
 

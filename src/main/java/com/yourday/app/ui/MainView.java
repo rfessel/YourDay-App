@@ -3,6 +3,7 @@ package com.yourday.app.ui;
 import com.yourday.app.app.YourDayApp;
 import com.yourday.app.core.services.AgendaService;
 import com.yourday.app.ui.pages.AgendaPage;
+import com.yourday.app.ui.pages.ListsPage;
 import com.yourday.app.ui.pages.NewsPage;
 import com.yourday.app.ui.pages.ResumePage;
 import com.yourday.app.ui.pages.SettingsPage;
@@ -44,6 +45,7 @@ public class MainView extends HBox implements UiContext {
         register("resumo", new ResumePage(this));
         register("agenda", new AgendaPage(this));
         register("tarefas", new TodosPage(this));
+        register("listas", new ListsPage(this));
         register("noticias", new NewsPage(this));
         register("clima", new WeatherPage(this));
         register("config", new SettingsPage(this));
@@ -68,6 +70,7 @@ public class MainView extends HBox implements UiContext {
         addNav(sidebar, "resumo", "◈  Resumo");
         addNav(sidebar, "agenda", "📅  Agenda");
         addNav(sidebar, "tarefas", "✅  Tarefas");
+        addNav(sidebar, "listas", "📝  Listas");
         addNav(sidebar, "noticias", "📰  Notícias");
         addNav(sidebar, "clima", "🌤  Clima");
         addNav(sidebar, "config", "⚙  Configurações");
