@@ -13,6 +13,7 @@ import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -72,18 +73,17 @@ public class AgendaPage extends VBox implements MainView.Refreshable {
 
         HBox monthBar = new HBox(8, prev, monthTitle, next);
         monthBar.setAlignment(Pos.CENTER);
+        monthBar.setMaxWidth(Region.USE_PREF_SIZE);
 
         Button addBtn = new Button("＋ Novo compromisso");
         addBtn.getStyleClass().add("primary-btn");
         addBtn.setOnAction(e -> openDialog(null));
 
-        Region growL = new Region();
-        HBox.setHgrow(growL, Priority.ALWAYS);
-        Region growR = new Region();
-        HBox.setHgrow(growR, Priority.ALWAYS);
-
-        HBox top = new HBox(8, growL, monthBar, growR, today, addBtn);
-        top.setAlignment(Pos.CENTER_LEFT);
+        BorderPane top = new BorderPane();
+        BorderPane.setAlignment(monthBar, Pos.CENTER);
+        top.setLeft(new HBox(today));
+        top.setCenter(monthBar);
+        top.setRight(addBtn);
 
         grid.setHgap(4);
         grid.setVgap(4);
