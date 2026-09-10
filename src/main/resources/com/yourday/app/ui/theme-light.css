@@ -69,6 +69,27 @@
     -fx-padding: 18 20 16 20;
     -fx-spacing: 14;
 }
+.tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: transparent;
+}
+.tab-pane > .tab-header-area .tab {
+    -fx-background-color: yd-card-bg;
+    -fx-background-radius: 6 6 0 0;
+    -fx-padding: 4 16 6 16;
+}
+.tab-pane > .tab-header-area .tab:hover {
+    -fx-background-color: yd-hover;
+}
+.tab-pane > .tab-header-area .tab:selected {
+    -fx-background-color: yd-accent;
+}
+.tab-pane > .tab-header-area .tab:selected .tab-label {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+.tab-pane > .tab-content-area {
+    -fx-background-color: transparent;
+}
 .page-title {
     -fx-font-size: 20px;
     -fx-font-weight: bold;

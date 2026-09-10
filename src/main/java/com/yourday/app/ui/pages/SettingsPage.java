@@ -10,6 +10,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
@@ -18,12 +20,10 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Configurações: tema, cidade, feeds, notificações e backup/restore. */
+/** Configurações organizadas por abas (Geral, Clima, Notícias, Dados). */
 public class SettingsPage extends VBox implements MainView.Refreshable {
 
     private final UiContext ctx;
@@ -44,6 +44,7 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         sub.getStyleClass().add("section-label");
 
         AppConfig cfg = ctx.agenda().config();
+        int pref = cfg.notifyAdvanceMinutes > 0 ? cfg.notifyAdvanceMinutes : 10;
 
         cityField.setText(cfg.cityName != null ? cfg.cityName : "");
         cityField.getStyleClass().add("field");
@@ -51,37 +52,70 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         searchCity.getStyleClass().add("primary-btn");
         searchCity.setOnAction(e -> saveCity());
 
-        feedsArea.setPrefRowCount(5);
+        feedsArea.setPrefRowCount(6);
         feedsArea.getStyleClass().add("field");
         feedsArea.setText(String.join("\n", cfg.feeds));
 
-        Button saveFeeds = new Button("Salvar feeds");
-        saveFeeds.getStyleClass().add("primary-btn");
-        saveFeeds.setOnAction(e -> {
-            List<String> feeds = new ArrayList<>();
-            for (String line : feedsArea.getText().split("\n")) {
-                String l = line.trim();
-                if (!l.isEmpty()) {
-                    feeds.add(l);
-                }
-            }
-            ctx.agenda().config().feeds = feeds;
-            ctx.agenda().saveConfig();
-        });
-
         notifOn.setSelected(cfg.notifyEnabled);
-        advance.getValueFactory().setValue(cfg.notifyAdvanceMinutes);
+        advance.getValueFactory().setValue(pref);
+
+        TabPane tabs = new TabPane();
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.setSide(javafx.geometry.Side.TOP);
+        tabs.setPrefHeight(520);
+        tabs.getTabs().addAll(
+                geralTab(),
+                climaTab(),
+                noticiasTab(),
+                dadosTab());
+
+        getChildren().addAll(title, sub, tabs);
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+    }
+
+    // ---------------- Abas ----------------
+
+    private Tab geralTab() {
         Button saveNotif = new Button("Salvar");
         saveNotif.getStyleClass().add("primary-btn");
         saveNotif.setOnAction(e -> {
             ctx.agenda().config().notifyEnabled = notifOn.isSelected();
             ctx.agenda().config().notifyAdvanceMinutes = advance.getValue();
             ctx.agenda().saveConfig();
+            saveNotif.setText("Salvo ✓");
         });
+        HBox notifRow = new HBox(8, new Label("Antecedência (min):"), advance, saveNotif);
+        notifRow.setAlignment(Pos.CENTER_LEFT);
 
-        // Tema: dois botões segmentados
-        VBox themeToggle = buildThemeToggle();
+        VBox content = pageBox(
+                Ui.card(Ui.sectionTitle("Tema"), buildThemeToggle()),
+                Ui.card(Ui.sectionTitle("Notificações"),
+                        notifOn, notifRow));
+        return tab("Geral", content);
+    }
 
+    private Tab climaTab() {
+        HBox row = new HBox(8, cityField, searchCity);
+        row.setAlignment(Pos.CENTER_LEFT);
+        VBox content = pageBox(
+                Ui.card(Ui.sectionTitle("Cidade do clima"),
+                        row,
+                        Ui.muted("Usada no resumo e na aba Clima.")));
+        return tab("Clima", content);
+    }
+
+    private Tab noticiasTab() {
+        Button saveFeeds = new Button("Salvar feeds");
+        saveFeeds.getStyleClass().add("primary-btn");
+        saveFeeds.setOnAction(e -> saveFeeds());
+
+        VBox content = pageBox(
+                Ui.card(Ui.sectionTitle("Feeds de notícias (um por linha)"),
+                        feedsArea, saveFeeds));
+        return tab("Notícias", content);
+    }
+
+    private Tab dadosTab() {
         Button backup = new Button("Exportar backup (JSON)");
         backup.getStyleClass().add("ghost-btn");
         backup.setOnAction(e -> backup());
@@ -93,22 +127,40 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         HBox backupRow = new HBox(10, backup, restore);
         backupRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label dataDir = Ui.muted("Pasta de dados: " + ctx.agenda().data().dir());
-
-        getChildren().addAll(
-                title, sub,
-                Ui.card(Ui.sectionTitle("Tema"), themeToggle),
-                Ui.card(Ui.sectionTitle("Cidade do clima"),
-                        new HBox(8, cityField, searchCity)),
-                Ui.card(Ui.sectionTitle("Feeds de notícias (um por linha)"),
-                        feedsArea, saveFeeds),
-                Ui.card(Ui.sectionTitle("Notificações"),
-                        notifOn,
-                        new HBox(8, new Label("Antecedência (min):"), advance, saveNotif)),
-                Ui.card(Ui.sectionTitle("Backup e restore"), backupRow, dataDir));
+        VBox content = pageBox(
+                Ui.card(Ui.sectionTitle("Backup e restore"),
+                        backupRow,
+                        Ui.muted("Pasta de dados: " + ctx.agenda().data().dir())));
+        return tab("Dados", content);
     }
 
-    private VBox buildThemeToggle() {
+    private static Tab tab(String name, VBox content) {
+        Tab t = new Tab(name, content);
+        t.setClosable(false);
+        return t;
+    }
+
+    private static VBox pageBox(javafx.scene.Node... cards) {
+        VBox box = new VBox(12, cards);
+        box.getStyleClass().add("content");
+        return box;
+    }
+
+    // ---------------- Ações ----------------
+
+    private void saveFeeds() {
+        List<String> feeds = new ArrayList<>();
+        for (String line : feedsArea.getText().split("\n")) {
+            String l = line.trim();
+            if (!l.isEmpty()) {
+                feeds.add(l);
+            }
+        }
+        ctx.agenda().config().feeds = feeds;
+        ctx.agenda().saveConfig();
+    }
+
+    private HBox buildThemeToggle() {
         Button light = new Button("Claro");
         Button dark = new Button("Escuro");
         light.getStyleClass().add("toggle-light");
@@ -134,8 +186,7 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
             apply.run();
         });
         apply.run();
-        VBox box = new VBox(8, seg);
-        return box;
+        return seg;
     }
 
     private void saveCity() {
@@ -216,6 +267,6 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
 
     @Override
     public void refresh() {
-        // Sem rastreamento contínuo: configurações são aplicadas ao salvar.
+        // Configurações são aplicadas ao salvar em cada aba.
     }
 }
