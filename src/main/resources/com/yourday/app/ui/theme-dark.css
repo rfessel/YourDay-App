@@ -1,0 +1,293 @@
+.root {
+    -fx-base: #14171c;
+    -fx-background: #14171c;
+    -fx-control-inner-background: #1c2027;
+    -fx-text-background-color: #e8eaef;
+    -fx-accent: #4da3ff;
+    -fx-focus-color: #4da3ff;
+    -fx-faint-focus-color: rgba(77, 163, 255, 0.15);
+    yd-card-bg: #1c2027;
+    yd-card-border: #2a2f38;
+    yd-muted: #9aa3ae;
+    yd-sidebar-bg: #0f1116;
+    yd-hover: rgba(232, 234, 239, 0.06);
+    yd-selected: rgba(77, 163, 255, 0.18);
+    yd-accent: #4da3ff;
+}
+
+.scroll-pane {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+.scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+.scroll-bar:vertical {
+    -fx-pref-width: 10;
+}
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+.scroll-bar .thumb {
+    -fx-background-color: #333a45;
+    -fx-background-radius: 6;
+}
+.scroll-bar .track {
+    -fx-background-color: transparent;
+}
+.scroll-bar .increment-button, .scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.root-pane {
+    -fx-background-color: -fx-background;
+}
+
+.sidebar {
+    -fx-background-color: yd-sidebar-bg;
+    -fx-padding: 14 10 12 10;
+    -fx-spacing: 6;
+}
+.app-title {
+    -fx-font-size: 17px;
+    -fx-font-weight: bold;
+    -fx-text-fill: yd-accent;
+    -fx-padding: 2 4 12 4;
+}
+.nav-button {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-text-fill: -fx-text-background-color;
+    -fx-font-size: 13px;
+    -fx-alignment: CENTER_LEFT;
+    -fx-padding: 9 12 9 12;
+    -fx-cursor: hand;
+}
+.nav-button:hover {
+    -fx-background-color: yd-hover;
+}
+.nav-button-selected {
+    -fx-background-color: yd-selected;
+    -fx-text-fill: yd-accent;
+    -fx-font-weight: bold;
+}
+.sidebar-footer {
+    -fx-font-size: 10px;
+    -fx-text-fill: yd-muted;
+}
+
+.content {
+    -fx-padding: 18 20 16 20;
+    -fx-spacing: 14;
+}
+.page-title {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+}
+.section-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: yd-accent;
+}
+.section-label {
+    -fx-font-size: 11px;
+    -fx-text-fill: yd-muted;
+}
+
+.card {
+    -fx-background-color: yd-card-bg;
+    -fx-background-radius: 8;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 8;
+    -fx-padding: 12;
+    -fx-spacing: 8;
+}
+.card-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+.card-sub {
+    -fx-font-size: 11px;
+    -fx-text-fill: yd-muted;
+}
+
+.toolbtn {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-text-fill: yd-accent;
+    -fx-font-size: 21px;
+    -fx-padding: 2 10 2 10;
+    -fx-cursor: hand;
+}
+.toolbtn:hover {
+    -fx-background-color: yd-hover;
+}
+.primary-btn {
+    -fx-background-color: yd-accent;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 6;
+    -fx-padding: 8 16 8 16;
+    -fx-cursor: hand;
+}
+.primary-btn:hover {
+    -fx-opacity: 0.9;
+}
+.ghost-btn {
+    -fx-background-color: transparent;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-text-fill: -fx-text-background-color;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+.ghost-btn:hover {
+    -fx-background-color: yd-hover;
+}
+.danger-btn {
+    -fx-background-color: transparent;
+    -fx-text-fill: #f27777;
+    -fx-border-color: #f27777;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+
+.field {
+    -fx-background-color: -fx-control-inner-background;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 7 10 7 10;
+    -fx-font-size: 13px;
+}
+.field:focused {
+    -fx-border-color: yd-accent;
+}
+
+.cal-header {
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-text-fill: yd-muted;
+    -fx-alignment: CENTER;
+}
+.cal-cell {
+    -fx-background-color: transparent;
+    -fx-background-radius: 6;
+    -fx-font-size: 12px;
+    -fx-pref-width: 40;
+    -fx-pref-height: 34;
+    -fx-alignment: CENTER;
+    -fx-border-radius: 6;
+    -fx-cursor: hand;
+}
+.cal-cell:hover {
+    -fx-background-color: yd-hover;
+}
+.cal-cell-today {
+    -fx-border-color: yd-accent;
+    -fx-border-radius: 6;
+    -fx-font-weight: bold;
+}
+.cal-cell-selected {
+    -fx-background-color: yd-accent;
+    -fx-text-fill: #0b0e14;
+    -fx-font-weight: bold;
+}
+.dots {
+    -fx-alignment: CENTER;
+    -fx-font-size: 8px;
+    -fx-text-fill: yd-accent;
+}
+
+.event-row {
+    -fx-background-color: yd-card-bg;
+    -fx-background-radius: 6;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 6;
+    -fx-padding: 8 10 8 10;
+    -fx-spacing: 8;
+}
+.event-time {
+    -fx-font-size: 11px;
+    -fx-text-fill: yd-muted;
+    -fx-font-weight: bold;
+}
+
+.headline {
+    -fx-font-size: 13px;
+    -fx-wrap-text: true;
+}
+.headline:hover {
+    -fx-text-fill: yd-accent;
+    -fx-cursor: hand;
+}
+.feed-error {
+    -fx-font-size: 11px;
+    -fx-text-fill: #f27777;
+}
+
+.updated-label {
+    -fx-font-size: 9px;
+    -fx-text-fill: yd-muted;
+}
+
+.todo-row {
+    -fx-padding: 6 0 6 0;
+    -fx-background-color: transparent;
+    -fx-spacing: 8;
+}
+.weather-now {
+    -fx-font-size: 40px;
+    -fx-font-weight: bold;
+}
+.weather-cond {
+    -fx-font-size: 15px;
+}
+.hour-cell {
+    -fx-alignment: CENTER;
+    -fx-spacing: 4;
+    -fx-padding: 8 6 8 6;
+    -fx-background-color: yd-card-bg;
+    -fx-background-radius: 6;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 6;
+    -fx-min-width: 56;
+}
+.day-cell {
+    -fx-alignment: CENTER;
+    -fx-spacing: 6;
+    -fx-padding: 10 8 10 8;
+    -fx-background-color: yd-card-bg;
+    -fx-background-radius: 6;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 6;
+    -fx-min-width: 84;
+}
+.weather-icon {
+    -fx-font-size: 24px;
+}
+.weather-icon-big {
+    -fx-font-size: 54px;
+}
+
+.toggle-segment {
+    -fx-alignment: CENTER;
+}
+.toggle-light, .toggle-dark {
+    -fx-background-radius: 6;
+    -fx-padding: 6 14 6 14;
+    -fx-cursor: hand;
+}
+.toggle-active-light {
+    -fx-background-color: #2d6cdf;
+    -fx-text-fill: white;
+}
+.toggle-active-dark {
+    -fx-background-color: #4da3ff;
+    -fx-text-fill: #0b0e14;
+}
