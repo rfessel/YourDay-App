@@ -16,6 +16,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
@@ -69,21 +70,34 @@ public class AgendaPage extends VBox implements MainView.Refreshable {
             rebuild();
         });
 
-        HBox header = new HBox(8, prev, monthTitle, next, today);
-        header.setAlignment(Pos.CENTER_LEFT);
-
-        grid.setHgap(4);
-        grid.setVgap(4);
-        grid.setAlignment(Pos.CENTER_LEFT);
-
-        VBox calBox = Ui.card(header, weekHeader(), grid);
-        calBox.setSpacing(8);
+        HBox monthBar = new HBox(8, prev, monthTitle, next);
+        monthBar.setAlignment(Pos.CENTER);
 
         Button addBtn = new Button("＋ Novo compromisso");
         addBtn.getStyleClass().add("primary-btn");
         addBtn.setOnAction(e -> openDialog(null));
 
-        HBox dayHead = new HBox(10, dayTitle, addBtn);
+        Region growL = new Region();
+        HBox.setHgrow(growL, Priority.ALWAYS);
+        Region growR = new Region();
+        HBox.setHgrow(growR, Priority.ALWAYS);
+
+        HBox top = new HBox(8, growL, monthBar, growR, today, addBtn);
+        top.setAlignment(Pos.CENTER_LEFT);
+
+        grid.setHgap(4);
+        grid.setVgap(4);
+        grid.setAlignment(Pos.CENTER);
+
+        // Calendário centralizado dentro do card
+        VBox cal = new VBox(6, weekHeader(), grid);
+        HBox calCenter = new HBox(cal);
+        calCenter.setAlignment(Pos.CENTER);
+
+        VBox calBox = Ui.card(top, calCenter);
+        calBox.setSpacing(8);
+
+        HBox dayHead = new HBox(10, dayTitle);
         dayHead.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(dayTitle, Priority.ALWAYS);
 

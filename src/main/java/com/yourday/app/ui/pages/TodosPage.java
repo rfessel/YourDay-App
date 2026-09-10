@@ -6,15 +6,19 @@ import com.yourday.app.ui.MainView;
 import com.yourday.app.ui.Ui;
 import com.yourday.app.ui.UiContext;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
-import javafx.scene.control.Separator;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -22,14 +26,14 @@ import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
 
-/** Tarefas com prazo opcional + histórico dos concluídos recentes. */
+/** Tarefas com prazo opcional + popup de tarefas finalizadas. */
 public class TodosPage extends VBox implements MainView.Refreshable {
 
     private final UiContext ctx;
     private final TextField input = new TextField();
     private final DatePicker duePicker = new DatePicker();
     private final VBox pendingBox = new VBox(6);
-    private final VBox doneBox = new VBox(6);
+    private final Button doneBtn = new Button();
 
     public TodosPage(UiContext ctx) {
         this.ctx = ctx;
@@ -57,9 +61,16 @@ public class TodosPage extends VBox implements MainView.Refreshable {
         HBox.setHgrow(input, Priority.ALWAYS);
 
         VBox pendingCard = Ui.card(Ui.sectionTitle("Pendentes"), pendingBox);
-        VBox doneCard = Ui.card(Ui.sectionTitle("Concluídos (7 dias)"), doneBox);
 
-        getChildren().addAll(title, sub, inputRow, pendingCard, doneCard);
+        doneBtn.getStyleClass().add("ghost-btn");
+        doneBtn.setOnAction(e -> openDonePopup());
+
+        Region grow = new Region();
+        VBox.setVgrow(grow, Priority.ALWAYS);
+        HBox footer = new HBox(doneBtn);
+        footer.setAlignment(Pos.BOTTOM_RIGHT);
+
+        getChildren().addAll(title, sub, inputRow, pendingCard, grow, footer);
         refresh();
     }
 
@@ -83,15 +94,13 @@ public class TodosPage extends VBox implements MainView.Refreshable {
     public void refresh() {
         List<TodoItem> all = ctx.agenda().todos();
         LocalDate today = AgendaService.today();
-        LocalDate weekAgo = today.minusDays(7);
+
+        long doneCount = all.stream().filter(t -> t.done).count();
+        doneBtn.setText("✓ Finalizados (" + doneCount + ")");
 
         List<TodoItem> pending = all.stream()
                 .filter(t -> !t.done)
                 .sorted(Comparator.comparingLong(t -> t.dueDate == 0 ? Long.MAX_VALUE : t.dueDate))
-                .toList();
-        List<TodoItem> done = all.stream()
-                .filter(t -> t.done)
-                .sorted(Comparator.comparingLong((TodoItem t) -> t.createdAt).reversed())
                 .toList();
 
         pendingBox.getChildren().clear();
@@ -100,24 +109,6 @@ public class TodosPage extends VBox implements MainView.Refreshable {
         }
         for (TodoItem t : pending) {
             pendingBox.getChildren().add(pendingRow(t, today));
-        }
-
-        doneBox.getChildren().clear();
-        long recent = done.stream().filter(t ->
-                LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(t.createdAt),
-                        ZoneId.systemDefault()).toLocalDate().isAfter(weekAgo) ||
-                        LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(t.createdAt),
-                                ZoneId.systemDefault()).toLocalDate().equals(weekAgo)).count();
-        if (recent == 0) {
-            doneBox.getChildren().add(Ui.muted("Nada concluído recentemente."));
-        }
-        for (TodoItem t : done) {
-            LocalDate dd = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(t.createdAt),
-                    ZoneId.systemDefault()).toLocalDate();
-            if (dd.isBefore(weekAgo)) {
-                continue;
-            }
-            doneBox.getChildren().add(doneRow(t, dd));
         }
     }
 
@@ -157,17 +148,83 @@ public class TodosPage extends VBox implements MainView.Refreshable {
         return row;
     }
 
-    private HBox doneRow(TodoItem t, LocalDate dd) {
+    private void openDonePopup() {
+        Stage stage = new Stage();
+        stage.initModality(Modality.APPLICATION_MODAL);
+        stage.setTitle("Tarefas finalizadas");
+
+        Label heading = new Label("Tarefas finalizadas");
+        heading.getStyleClass().add("page-title");
+
+        VBox list = new VBox(6);
+        ScrollPane scroll = Ui.scroll(list);
+        scroll.setPrefViewportHeight(380);
+
+        Button close = new Button("Fechar");
+        close.setDefaultButton(true);
+        close.getStyleClass().add("ghost-btn");
+        close.setOnAction(e -> stage.close());
+        HBox footer = new HBox(close);
+        footer.setAlignment(Pos.CENTER_RIGHT);
+
+        VBox box = new VBox(10);
+        box.getStyleClass().add("content");
+        box.getChildren().addAll(heading, scroll, footer);
+
+        stage.setScene(new Scene(box, 520, 480));
+        stage.getScene().getStylesheets().setAll(
+                com.yourday.app.app.YourDayApp.themeUrl(ctx.theme()));
+        renderPopupList(list);
+        stage.showAndWait();
+        refresh();
+    }
+
+    private void renderPopupList(VBox list) {
+        list.getChildren().clear();
+        List<TodoItem> done = ctx.agenda().todos().stream()
+                .filter(t -> t.done)
+                .sorted(Comparator.comparingLong((TodoItem t) -> t.createdAt).reversed())
+                .toList();
+        if (done.isEmpty()) {
+            list.getChildren().add(Ui.muted("Nenhuma tarefa finalizada."));
+            return;
+        }
+        for (TodoItem t : done) {
+            list.getChildren().add(popupDoneRow(t, list));
+        }
+    }
+
+    private HBox popupDoneRow(TodoItem t, VBox list) {
         HBox row = new HBox(8);
         row.getStyleClass().add("todo-row");
         row.setAlignment(Pos.CENTER_LEFT);
-        row.setOpacity(0.65);
+        row.setOpacity(0.8);
 
         Label text = new Label("✓ " + t.title);
         text.setWrapText(true);
         HBox.setHgrow(text, Priority.ALWAYS);
-        Label when = Ui.muted("em " + dd.getDayOfMonth() + " " + Ui.monthName(dd));
-        row.getChildren().addAll(text, when);
+
+        LocalDate dd = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(t.createdAt),
+                ZoneId.systemDefault()).toLocalDate();
+        Label when = Ui.muted("finalizada em " + dd.getDayOfMonth() + " " + Ui.monthName(dd));
+        when.setMinWidth(120);
+
+        Button restore = new Button("↺");
+        restore.getStyleClass().add("toolbtn");
+        restore.setOnAction(e -> {
+            t.done = false;
+            ctx.agenda().saveTodo(t);
+            renderPopupList(list);
+        });
+
+        Button del = new Button("✕");
+        del.getStyleClass().add("toolbtn");
+        del.setOnAction(e -> {
+            ctx.agenda().removeTodo(t.id);
+            renderPopupList(list);
+        });
+
+        row.getChildren().addAll(text, when, restore, del);
         return row;
     }
 

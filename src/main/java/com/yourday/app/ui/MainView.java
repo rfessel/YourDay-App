@@ -73,11 +73,12 @@ public class MainView extends HBox implements UiContext {
         addNav(sidebar, "listas", "📝  Listas");
         addNav(sidebar, "noticias", "📰  Notícias");
         addNav(sidebar, "clima", "🌤  Clima");
-        addNav(sidebar, "config", "⚙  Configurações");
 
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
         sidebar.getChildren().add(spacer);
+
+        addNav(sidebar, "config", "⚙  Configurações");
 
         Label footer = new Label("v0.1.0 · dados em " + agenda.data().dir());
         footer.getStyleClass().add("sidebar-footer");
