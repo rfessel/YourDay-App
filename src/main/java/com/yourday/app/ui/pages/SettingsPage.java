@@ -1,11 +1,13 @@
 package com.yourday.app.ui.pages;
 
 import com.yourday.app.core.model.AppConfig;
-import com.yourday.app.core.services.AgendaService;
+import com.yourday.app.core.services.WeatherService;
 import com.yourday.app.ui.MainView;
 import com.yourday.app.ui.Ui;
 import com.yourday.app.ui.UiContext;
+import javafx.application.Platform;
 import javafx.geometry.Pos;
+import javafx.geometry.Side;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
@@ -27,11 +29,18 @@ import java.util.List;
 public class SettingsPage extends VBox implements MainView.Refreshable {
 
     private final UiContext ctx;
-    private final TextField cityField = new TextField();
-    private final Button searchCity = new Button("Buscar e salvar");
     private final TextArea feedsArea = new TextArea();
     private final CheckBox notifOn = new CheckBox("Ativar notificações de agenda");
     private final Spinner<Integer> advance = new Spinner<>(1, 120, 10);
+
+    // Aba Clima
+    private final TextField cityField = new TextField();
+    private final Label climaStatus = new Label();
+    private final VBox cityResultsBox = new VBox(4);
+    private final VBox extraCitiesBox = new VBox(4);
+    private final Label principalLabel = new Label();
+    private final Button buscarBtn = new Button("Buscar");
+    private final Button salvarBtn = new Button("Salvar");
 
     public SettingsPage(UiContext ctx) {
         this.ctx = ctx;
@@ -46,12 +55,6 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         AppConfig cfg = ctx.agenda().config();
         int pref = cfg.notifyAdvanceMinutes > 0 ? cfg.notifyAdvanceMinutes : 10;
 
-        cityField.setText(cfg.cityName != null ? cfg.cityName : "");
-        cityField.getStyleClass().add("field");
-        HBox.setHgrow(cityField, Priority.ALWAYS);
-        searchCity.getStyleClass().add("primary-btn");
-        searchCity.setOnAction(e -> saveCity());
-
         feedsArea.setPrefRowCount(6);
         feedsArea.getStyleClass().add("field");
         feedsArea.setText(String.join("\n", cfg.feeds));
@@ -61,8 +64,7 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
 
         TabPane tabs = new TabPane();
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setSide(javafx.geometry.Side.TOP);
-        tabs.setPrefHeight(520);
+        tabs.setSide(Side.TOP);
         tabs.getTabs().addAll(
                 geralTab(),
                 climaTab(),
@@ -95,13 +97,55 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
     }
 
     private Tab climaTab() {
-        HBox row = new HBox(8, cityField, searchCity);
+        AppConfig cfg = ctx.agenda().config();
+        cityField.setText(cfg.cityName != null ? cfg.cityName : "");
+        cityField.getStyleClass().add("field");
+        cityField.setPromptText("Digite uma cidade…");
+        HBox.setHgrow(cityField, Priority.ALWAYS);
+
+        buscardBtn("buscar");
+        buscardBtn("salvar");
+
+        Button geoBtn = new Button("Minha localização");
+        geoBtn.getStyleClass().add("ghost-btn");
+        geoBtn.setOnAction(e -> locateByIp());
+
+        HBox row = new HBox(8, cityField, buscarBtn, salvarBtn, geoBtn);
         row.setAlignment(Pos.CENTER_LEFT);
+
+        climaStatus.getStyleClass().add("section-label");
+        SelectiveBox resultsBox = new SelectiveBox("Resultados da busca", cityResultsBox);
+        SelectiveBox extrasBox = new SelectiveBox("Cidades complementares", extraCitiesBox);
+        principalsLabel();
+
         VBox content = pageBox(
                 Ui.card(Ui.sectionTitle("Cidade do clima"),
                         row,
-                        Ui.muted("Usada no resumo e na aba Clima.")));
+                        climaStatus,
+                        resultsBox.box(),
+                        principalLabel,
+                        extrasBox.box()));
         return tab("Clima", content);
+    }
+
+    /** Botões Buscar e Salvar (dois botões distintos sobre o mesmo campo). */
+    private void buscardBtn(String kind) {
+        Button b = kind.equals("buscar") ? buscarBtn : salvarBtn;
+        b.getStyleClass().add(kind.equals("buscar") ? "ghost-btn" : "primary-btn");
+        if (kind.equals("buscar")) {
+            b.setOnAction(e -> doBuscar());
+        } else {
+            b.setOnAction(e -> doSalvar());
+        }
+    }
+
+    /** Rótulo da cidade principal atualizada após cada mudança. */
+    private void principalsLabel() {
+        AppConfig cfg = ctx.agenda().config();
+        principalLabel.getStyleClass().add("section-label");
+        principalLabel.setText(cfg.cityName != null && !cfg.cityName.isBlank()
+                ? "Cidade principal: " + cfg.cityName : "Nenhuma cidade principal definida.");
+        renderExtraCities(cfg);
     }
 
     private Tab noticiasTab() {
@@ -146,7 +190,203 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         return box;
     }
 
-    // ---------------- Ações ----------------
+    /** Caixa com título opcional + conteúdo (usada para resultados e adicionais). */
+    private record SelectiveBox(String title, VBox content) {
+        VBox box() {
+            VBox w = new VBox(4);
+            if (title != null && !title.isBlank()) {
+                Label l = new Label(title);
+                l.getStyleClass().add("section-label");
+                w.getChildren().add(l);
+            }
+            w.getChildren().add(content);
+            return w;
+        }
+    }
+
+    // ---------------- Ações: Clima ----------------
+
+    private void doBuscar() {
+        String q = cityField.getText().trim();
+        if (q.isEmpty()) {
+            return;
+        }
+        buscarBtn.setDisable(true);
+        climaStatus.setText("Buscando " + q + "…");
+        cityResultsBox.getChildren().clear();
+        cities.search(q, 5, this::renderCityResults, e -> busResultError(e, q));
+    }
+
+    private void busResultError(Exception e, String q) {
+        Platform.runLater(() -> {
+            buscarBtn.setDisable(false);
+            climaStatus.setText("Erro na busca de \"" + q + "\": " + e.getMessage());
+        });
+    }
+
+    private void renderCityResults(List<WeatherService.CityResult> results) {
+        Platform.runLater(() -> {
+            buscarBtn.setDisable(false);
+            cityResultsBox.getChildren().clear();
+            if (results.isEmpty()) {
+                climaStatus.setText("Nenhuma cidade encontrada.");
+                return;
+            }
+            climaStatus.setText(results.size() + " resultado(s).");
+            for (WeatherService.CityResult r : results) {
+                HBox row = new HBox(6);
+                row.setAlignment(Pos.CENTER_LEFT);
+                Label name = new Label(r.label());
+                name.getStyleClass().add("card-sub");
+                HBox.setHgrow(name, Priority.ALWAYS);
+                Button main = new Button("← principal");
+                main.getStyleClass().add("toolbtn");
+                main.setOnAction(e -> setAsMain(r));
+                Button add = new Button("+ adicional");
+                add.getStyleClass().add("toolbtn");
+                add.setOnAction(e -> addExtraCity(r));
+                row.getChildren().addAll(name, main, add);
+                cityResultsBox.getChildren().add(row);
+            }
+        });
+    }
+
+    /** Salva o texto digitado como cidade principal (geocodifica e grava). */
+    private void doSalvar() {
+        String q = cityField.getText().trim();
+        if (q.isEmpty()) {
+            return;
+        }
+        salvarBtn.setDisable(true);
+        climaStatus.setText("Salvando " + q + "…");
+        cities.search(q, 1, list -> {
+            if (list.isEmpty()) {
+                Platform.runLater(() -> {
+                    salvarBtn.setDisable(false);
+                    climaStatus.setText("Cidade não encontrada: " + q);
+                });
+                return;
+            }
+            setAsMain(list.get(0), "Cidade salva ✓");
+            Platform.runLater(() -> salvarBtn.setDisable(false));
+        }, e -> Platform.runLater(() -> {
+            salvarBtn.setDisable(false);
+            climaStatus.setText("Erro ao salvar: " + e.getMessage());
+        }));
+    }
+
+    private void setAsMain(WeatherService.CityResult r) {
+        setAsMain(r, "Cidade principal definida ✓");
+    }
+
+    private void setAsMain(WeatherService.CityResult r, String msg) {
+        AppConfig cfg = ctx.agenda().config();
+        cfg.cityName = r.label();
+        cfg.cityLat = r.lat();
+        cfg.cityLon = r.lon();
+        ctx.agenda().saveConfig();
+        Platform.runLater(() -> {
+            cityField.setText(cfg.cityName);
+            principalsLabel();
+            cityResultsBox.getChildren().clear();
+            climaStatus.setText(msg);
+        });
+    }
+
+    private void addExtraCity(WeatherService.CityResult r) {
+        AppConfig cfg = ctx.agenda().config();
+        if (cfg.extraCities.stream().anyMatch(e -> e.name.equalsIgnoreCase(r.label()))) {
+            climaStatus.setText("Já adicionada: " + r.label());
+            return;
+        }
+        cfg.extraCities.add(new AppConfig.ExtraCity(r.label(), r.lat(), r.lon()));
+        ctx.agenda().saveConfig();
+        renderExtraCities(cfg);
+        cityResultsBox.getChildren().clear();
+        climaStatus.setText("Cidade complementar adicionada ✓");
+    }
+
+    private void renderExtraCities(AppConfig cfg) {
+        extraCitiesBox.getChildren().clear();
+        List<AppConfig.ExtraCity> ecs = cfg.extraCities == null ? List.of() : cfg.extraCities;
+        if (ecs.isEmpty()) {
+            Label none = new Label("Nenhuma cidade complementar.");
+            none.getStyleClass().add("section-label");
+            extraCitiesBox.getChildren().add(none);
+            return;
+        }
+        for (int i = 0; i < ecs.size(); i++) {
+            AppConfig.ExtraCity ec = ecs.get(i);
+            HBox row = new HBox(6);
+            row.setAlignment(Pos.CENTER_LEFT);
+            Label name = new Label(ec.name);
+            name.getStyleClass().add("card-sub");
+            HBox.setHgrow(name, Priority.ALWAYS);
+            Button del = new Button("✕");
+            del.getStyleClass().add("toolbtn");
+            final int idx = i;
+            del.setOnAction(e -> {
+                cfg.extraCities.remove(idx);
+                ctx.agenda().saveConfig();
+                renderExtraCities(cfg);
+            });
+            row.getChildren().addAll(name, del);
+            extraCitiesBox.getChildren().add(row);
+        }
+    }
+
+    private void locateByIp() {
+        climaStatus.setText("Obtendo localização…");
+        cities.geo(list -> setAsMain(
+                list.stream().findFirst().orElseThrow(), "Localização definida ✓"),
+                e -> Platform.runLater(() ->
+                        climaStatus.setText("Erro na localização: " + e.getMessage())));
+    }
+
+    /** Adaptador: executa a busca de cidades em thread de fundo com feedback. */
+    private interface CitiesOps {
+        void search(String q, int count,
+                    java.util.function.Consumer<List<WeatherService.CityResult>> onOk,
+                    java.util.function.Consumer<Exception> onErr);
+
+        void geo(java.util.function.Consumer<List<WeatherService.CityResult>> onOk,
+                 java.util.function.Consumer<Exception> onErr);
+    }
+
+    private final CitiesOps cities = new CitiesOps() {
+        @Override
+        public void search(String q, int count,
+                           java.util.function.Consumer<List<WeatherService.CityResult>> onOk,
+                           java.util.function.Consumer<Exception> onErr) {
+            com.yourday.app.core.services.HttpSupport.getAsync(
+                    "https://geocoding-api.open-meteo.com/v1/search?name="
+                            + java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8)
+                            + "&count=" + count + "&language=pt&format=json",
+                    s -> {
+                        try {
+                            onOk.accept(WeatherService.searchCitiesResponse(s));
+                        } catch (Exception e) {
+                            onErr.accept(e);
+                        }
+                    }, onErr);
+        }
+
+        @Override
+        public void geo(java.util.function.Consumer<List<WeatherService.CityResult>> onOk,
+                        java.util.function.Consumer<Exception> onErr) {
+            com.yourday.app.core.services.HttpSupport.getAsync(
+                    "https://ip-api.com/json/?fields=status,message,lat,lon,city,regionName&lang=pt",
+                    s -> {
+                        try {
+                            onOk.accept(List.of(WeatherService.parseGeoResponse(s)));
+                        } catch (Exception e) {
+                            onErr.accept(e);
+                        }
+                    }, onErr);
+        }
+    };
+
+    // ---------------- Ações: demais ----------------
 
     private void saveFeeds() {
         List<String> feeds = new ArrayList<>();
@@ -189,46 +429,6 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         return seg;
     }
 
-    private void saveCity() {
-        String city = cityField.getText().trim();
-        if (city.isEmpty()) {
-            return;
-        }
-        searchCity.setDisable(true);
-        com.yourday.app.core.services.HttpSupport.getAsync(
-                "https://geocoding-api.open-meteo.com/v1/search?name="
-                        + java.net.URLEncoder.encode(city, java.nio.charset.StandardCharsets.UTF_8)
-                        + "&count=1&language=pt&format=json",
-                s -> {
-                    try {
-                        var json = com.google.gson.JsonParser.parseString(s).getAsJsonObject();
-                        var results = json.getAsJsonArray("results");
-                        javafx.application.Platform.runLater(() -> {
-                            searchCity.setDisable(false);
-                            if (results == null || results.isEmpty()) {
-                                cityField.setStyle("-fx-text-fill: #d64545;");
-                                return;
-                            }
-                            cityField.setStyle("");
-                            var first = results.get(0).getAsJsonObject();
-                            AppConfig cfg = ctx.agenda().config();
-                            cfg.cityLat = first.get("latitude").getAsDouble();
-                            cfg.cityLon = first.get("longitude").getAsDouble();
-                            String name = first.get("name").getAsString();
-                            if (first.has("admin1")) {
-                                name += ", " + first.get("admin1").getAsString();
-                            }
-                            cfg.cityName = name;
-                            ctx.agenda().saveConfig();
-                            cityField.setText(name);
-                        });
-                    } catch (Exception e) {
-                        javafx.application.Platform.runLater(() -> searchCity.setDisable(false));
-                    }
-                },
-                e -> javafx.application.Platform.runLater(() -> searchCity.setDisable(false)));
-    }
-
     private void backup() {
         FileChooser fc = new FileChooser();
         fc.setTitle("Exportar backup");
@@ -240,7 +440,7 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         try {
             ctx.agenda().data().backup(file.toPath());
         } catch (Exception e) {
-            showToast("Falha no backup: " + e.getMessage());
+            System.out.println("Falha no backup: " + e.getMessage());
         }
     }
 
@@ -255,14 +455,10 @@ public class SettingsPage extends VBox implements MainView.Refreshable {
         try {
             ctx.agenda().data().restore(file.toPath());
             ctx.refreshAll();
-            showToast("Backup restaurado.");
+            System.out.println("Backup restaurado.");
         } catch (Exception e) {
-            showToast("Falha ao restaurar: " + e.getMessage());
+            System.out.println("Falha ao restaurar: " + e.getMessage());
         }
-    }
-
-    private void showToast(String msg) {
-        System.out.println(msg);
     }
 
     @Override

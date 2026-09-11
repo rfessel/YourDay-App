@@ -9,28 +9,26 @@ import com.yourday.app.ui.Ui;
 import com.yourday.app.ui.UiContext;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
-import javafx.geometry.Insets;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Locale;
 
-/** Clima: cidade atual + horária + previsão de 7 dias (Open-Meteo). */
+/** Clima: cidade atual (principal + complementares) + horária + previsão de 7 dias. */
 public class WeatherPage extends VBox implements MainView.Refreshable {
 
     private final UiContext ctx;
     private final TextField searchField = new TextField();
     private final Label status = new Label();
     private final VBox nowBox = new VBox(8);
+    private final VBox extrasBox = new VBox(8);
     private final VBox hoursBox = new VBox(8);
     private final VBox daysBox = new VBox(8);
     private long lastFetch;
@@ -55,16 +53,49 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         searchBtn.getStyleClass().add("ghost-btn");
         searchBtn.setOnAction(e -> geocodeAndFetch(searchField.getText().trim()));
 
+        Button geoBtn = new Button("Minha localização");
+        geoBtn.getStyleClass().add("ghost-btn");
+        geoBtn.setOnAction(e -> locateByIp());
+
         Button reloadBtn = new Button("↻");
         reloadBtn.getStyleClass().add("toolbtn");
-        reloadBtn.setOnAction(e -> doFetch(cfg.cityLat, cfg.cityLon, cfg.cityName));
+        reloadBtn.setOnAction(e -> refresh());
 
-        HBox searchRow = new HBox(8, searchField, searchBtn, reloadBtn);
+        HBox searchRow = new HBox(8, searchField, searchBtn, geoBtn, reloadBtn);
         searchRow.setAlignment(Pos.CENTER_LEFT);
 
         status.getStyleClass().add("section-label");
 
-        getChildren().addAll(title, sub, searchRow, status, nowBox, hoursBox, daysBox);
+        getChildren().addAll(title, sub, searchRow, status, nowBox, extrasBox, hoursBox, daysBox);
+    }
+
+    private void locateByIp() {
+        status.setText("Obtendo localização…");
+        HttpSupport.getAsync("https://ip-api.com/json/?fields=status,message,lat,lon,city,regionName&lang=pt",
+                s -> {
+                    try {
+                        var json = com.google.gson.JsonParser.parseString(s).getAsJsonObject();
+                        if (!"success".equals(json.get("status").getAsString())) {
+                            Platform.runLater(() -> status.setText("GeoIP falhou: " + json.get("message").getAsString()));
+                            return;
+                        }
+                        String city = json.get("city").getAsString();
+                        String region = json.has("regionName") ? json.get("regionName").getAsString() : "";
+                        String name = region == null || region.isBlank() ? city : city + ", " + region;
+                        double lat = json.get("lat").getAsDouble();
+                        double lon = json.get("lon").getAsDouble();
+                        AppConfig cfg = ctx.agenda().config();
+                        cfg.cityName = name;
+                        cfg.cityLat = lat;
+                        cfg.cityLon = lon;
+                        ctx.agenda().saveConfig();
+                        searchField.setText(name);
+                        Platform.runLater(() -> doFetch(lat, lon, name));
+                    } catch (Exception e) {
+                        Platform.runLater(() -> status.setText("Erro na localização: " + e.getMessage()));
+                    }
+                },
+                e -> Platform.runLater(() -> status.setText("Erro na localização: " + e.getMessage())));
     }
 
     private void geocodeAndFetch(String city) {
@@ -95,6 +126,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
                         cfg.cityLat = lat;
                         cfg.cityLon = lon;
                         ctx.agenda().saveConfig();
+                        searchField.setText(finalName);
                         Platform.runLater(() -> doFetch(lat, lon, finalName));
                     } catch (Exception e) {
                         Platform.runLater(() -> status.setText("Erro na busca da cidade."));
@@ -110,6 +142,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             AppConfig cfg = ctx.agenda().config();
             doFetch(cfg.cityLat, cfg.cityLon, cfg.cityName);
         }
+        renderExtras();
     }
 
     private void doFetch(Double lat, Double lon, String cityName) {
@@ -118,52 +151,9 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             return;
         }
         status.setText("Carregando previsão…");
-        HttpSupport.getAsync(forecastUrl(lat, lon), s -> {
-            WeatherData w = new WeatherData();
+        HttpSupport.getAsync(WeatherService.forecastUrl(lat, lon), s -> {
             try {
-                var root = com.google.gson.JsonParser.parseString(s).getAsJsonObject();
-                w.cityName = cityName;
-                w.fetchedAt = System.currentTimeMillis();
-                var current = root.getAsJsonObject("current");
-                w.now.temp = current.get("temperature_2m").getAsDouble();
-                w.now.code = current.get("weather_code").getAsInt();
-                w.now.feelsLike = current.get("apparent_temperature").getAsDouble();
-                w.now.humidity = current.get("relative_humidity_2m").getAsInt();
-                w.now.windKmh = current.get("wind_speed_10m").getAsDouble();
-                w.now.isDay = current.get("is_day").getAsInt() == 1;
-                w.now.precipitation = current.get("precipitation").getAsDouble();
-
-                var hourly = root.getAsJsonObject("hourly");
-                var hTimes = hourly.getAsJsonArray("time");
-                var hTemps = hourly.getAsJsonArray("temperature_2m");
-                var hCodes = hourly.getAsJsonArray("weather_code");
-                for (int i = 0; i < hTimes.size() && i < 24; i++) {
-                    WeatherData.Hour h = new WeatherData.Hour();
-                    h.time = java.time.Instant.parse(hTimes.get(i).getAsString()).toEpochMilli();
-                    h.temp = hTemps.get(i).getAsDouble();
-                    h.code = hCodes.get(i).getAsInt();
-                    w.hours.add(h);
-                }
-
-                var daily = root.getAsJsonObject("daily");
-                var dDates = daily.getAsJsonArray("time");
-                var dMax = daily.getAsJsonArray("temperature_2m_max");
-                var dMin = daily.getAsJsonArray("temperature_2m_min");
-                var dCodes = daily.getAsJsonArray("weather_code");
-                var dProbs = daily.getAsJsonArray("precipitation_probability_max");
-                var dRise = daily.getAsJsonArray("sunrise");
-                var dSet = daily.getAsJsonArray("sunset");
-                for (int i = 0; i < dDates.size(); i++) {
-                    WeatherData.Day d = new WeatherData.Day();
-                    d.date = java.time.LocalDate.parse(dDates.get(i).getAsString());
-                    d.max = dMax.get(i).getAsDouble();
-                    d.min = dMin.get(i).getAsDouble();
-                    d.code = dCodes.get(i).getAsInt();
-                    d.precipProb = dProbs.get(i).getAsInt();
-                    d.sunrise = hm(dRise.get(i).getAsString());
-                    d.sunset = hm(dSet.get(i).getAsString());
-                    w.days.add(d);
-                }
+                WeatherData w = WeatherService.parseForecast(s, cityName);
                 Platform.runLater(() -> show(w));
             } catch (Exception e) {
                 Platform.runLater(() -> status.setText("Erro ao carregar a previsão."));
@@ -172,32 +162,55 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         lastFetch = System.currentTimeMillis();
     }
 
-    private static String hm(String iso) {
-        try {
-            return java.time.Instant.parse(iso).atZone(java.time.ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("HH:mm"));
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private static String forecastUrl(double lat, double lon) {
-        return "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
-                + "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,"
-                + "precipitation,weather_code,wind_speed_10m"
-                + "&hourly=temperature_2m,weather_code&forecast_hours=24"
-                + "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-                + "precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=7";
-    }
-
     private void show(WeatherData w) {
         status.setText("");
+        nowBox.getChildren().setAll(Ui.card(nowHeader(w), nowExtra(w)));
+        hoursBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Próximas 24 horas"),
+                hoursRow(w)));
+        daysBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Previsão da semana"),
+                daysRow(w)));
+        renderExtras();
+    }
 
-        // Agora
-        VBox nowCard = Ui.card(nowHeader(w), nowExtra(w));
-        nowBox.getChildren().setAll(nowCard);
+    private void renderExtras() {
+        AppConfig cfg = ctx.agenda().config();
+        extrasBox.getChildren().clear();
+        if (cfg.extraCities == null || cfg.extraCities.isEmpty()) {
+            return;
+        }
+        VBox card = Ui.card(Ui.sectionTitle("Cidades complementares"));
+        for (AppConfig.ExtraCity ec : cfg.extraCities) {
+            HBox row = new HBox(10);
+            row.setAlignment(Pos.CENTER_LEFT);
+            Label name = new Label(ec.name);
+            name.getStyleClass().add("card-sub");
+            Label icon = new Label("…");
+            icon.getStyleClass().add("weather-icon");
+            Label temp = new Label("—");
+            temp.getStyleClass().add("card-sub");
+            HBox.setHgrow(name, Priority.ALWAYS);
+            row.getChildren().addAll(name, icon, temp);
+            card.getChildren().add(row);
+            final HBox r = row;
+            HttpSupport.getAsync(WeatherService.forecastUrl(ec.lat, ec.lon), s -> {
+                try {
+                    WeatherData w = WeatherService.parseForecast(s, ec.name);
+                    Platform.runLater(() -> {
+                        ((Label) r.getChildren().get(1)).setText(WeatherData.icon(w.now.code));
+                        ((Label) r.getChildren().get(2)).setText(Math.round(w.now.temp) + "° · "
+                                + WeatherData.condition(w.now.code));
+                    });
+                } catch (Exception ignored) {
+                    Platform.runLater(() ->
+                            ((Label) r.getChildren().get(2)).setText("—"));
+                }
+            }, e -> Platform.runLater(() ->
+                    ((Label) r.getChildren().get(2)).setText("—")));
+        }
+        extrasBox.getChildren().add(card);
+    }
 
-        // Horária (rolagem horizontal)
+    private ScrollPane hoursRow(WeatherData w) {
         HBox hours = new HBox(6);
         for (WeatherData.Hour h : w.hours) {
             VBox cell = new VBox(3);
@@ -213,11 +226,16 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             cell.getChildren().addAll(t, icon, temp);
             hours.getChildren().add(cell);
         }
-        ScrollPane hoursScroll = scrollHorizontal(hours);
-        hoursScroll.setMaxHeight(130);
-        hoursBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Próximas 24 horas"), hoursScroll));
+        ScrollPane hs = new ScrollPane(hours);
+        hs.setFitToHeight(true);
+        hs.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        hs.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        hs.setStyle("-fx-background-color: transparent;");
+        hs.setMaxHeight(130);
+        return hs;
+    }
 
-        // Diária
+    private HBox daysRow(WeatherData w) {
         HBox days = new HBox(6);
         for (WeatherData.Day d : w.days) {
             VBox cell = new VBox(4);
@@ -236,7 +254,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             cell.getChildren().addAll(dl, icon, temp, rain);
             days.getChildren().add(cell);
         }
-        daysBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Previsão da semana"), days));
+        return days;
     }
 
     private HBox nowHeader(WeatherData w) {
@@ -274,14 +292,5 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         val.getStyleClass().add("card-title");
         v.getChildren().addAll(l, val);
         return v;
-    }
-
-    private static ScrollPane scrollHorizontal(HBox content) {
-        ScrollPane sp = new ScrollPane(content);
-        sp.setFitToHeight(true);
-        sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        sp.setStyle("-fx-background-color: transparent;");
-        return sp;
     }
 }
