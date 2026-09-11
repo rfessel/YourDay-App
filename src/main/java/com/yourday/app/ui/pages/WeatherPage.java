@@ -12,9 +12,9 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tooltip;
-import javafx.scene.layout.FlowPane;
+import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -28,14 +28,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Clima: seletor de cidade no rodapé (fixo) + cards roláveis + cidades complementares. */
+/** Clima: seletor de cidade + cards (principal, horas, semana) + cidades complementares. */
 public class WeatherPage extends VBox implements MainView.Refreshable {
 
     private static final long FETCH_COOLDOWN_MS = 15 * 60_000L;
 
     private final UiContext ctx;
     private final Label status = new Label();
-
     private final VBox nowBox = new VBox(8);
     private final VBox hoursBox = new VBox(8);
     private final VBox daysBox = new VBox(8);
@@ -69,21 +68,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
 
         status.getStyleClass().add("section-label");
 
-        // Área rolável com os cards (principal, horas, semana)
-        VBox content = new VBox(12, nowBox, hoursBox, daysBox);
-        ScrollPane scroll = new ScrollPane(content);
-        scroll.setFitToWidth(true);
-        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scroll.setStyle("-fx-background-color: transparent;");
-        scroll.setMinHeight(0);
-        scroll.setPrefHeight(1);
-        VBox.setVgrow(scroll, Priority.ALWAYS);
-
-        // Rodapé fixo: seletor de cidade + cidades complementares
-        cityCombo.getStyleClass().add("field");
-        cityCombo.setMaxWidth(Double.MAX_VALUE);
-        HBox.setHgrow(cityCombo, Priority.ALWAYS);
+        // Seletor de cidade (item exibido primeiro, demais em seguida)
         cityCombo.setOnAction(e -> onCitySelected());
 
         Label cityLbl = new Label("Cidade:");
@@ -91,10 +76,13 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         HBox comboRow = new HBox(8, cityLbl, cityCombo);
         comboRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label others = Ui.sectionTitle("Outras cidades");
-        VBox footer = new VBox(8, comboRow, others, extrasBox);
+        // Espaçador empurra rodapé (seletor + complementares) para o final da página
+        Region push = new Region();
+        VBox.setVgrow(push, Priority.ALWAYS);
 
-        getChildren().addAll(header, status, scroll, footer);
+        Label others = Ui.sectionTitle("Outras cidades");
+
+        getChildren().addAll(header, status, nowBox, hoursBox, daysBox, push, comboRow, others, extrasBox);
     }
 
     // ---------------- Seleção de cidade ----------------
@@ -235,7 +223,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             return;
         }
         nowBox.getChildren().add(Ui.card(nowHeader(w), nowExtra(w)));
-        hoursBox.getChildren().add(Ui.card(Ui.sectionTitle("Próximas horas"), hoursRow(w)));
+        hoursBox.getChildren().add(Ui.card(Ui.sectionTitle("Próximas horas"), hoursGrid(w)));
         daysBox.getChildren().add(Ui.card(Ui.sectionTitle("Previsão da semana"), daysRow(w)));
     }
 
@@ -262,7 +250,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         }
     }
 
-    /** Cartão compacto de uma outra cidade (rodapé fixo). */
+    /** Cartão compacto de uma outra cidade. */
     private HBox extraRow(String name, WeatherData w) {
         HBox row = new HBox(10);
         row.getStyleClass().add("card");
@@ -283,26 +271,36 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         return row;
     }
 
-    private FlowPane hoursRow(WeatherData w) {
-        FlowPane hours = new FlowPane(8, 10);
-        hours.setPrefWrapLength(Double.MAX_VALUE);
-        for (WeatherData.Hour h : w.hours) {
-            VBox cell = new VBox(3);
-            cell.getStyleClass().add("hour-cell");
-            cell.setMinWidth(92);
-            cell.setPrefWidth(92);
-            String hm = LocalTime.ofInstant(java.time.Instant.ofEpochMilli(h.time),
-                    java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"));
-            Label t = new Label(hm);
-            t.getStyleClass().add("section-label");
-            Label icon = new Label(WeatherData.icon(h.code));
-            icon.getStyleClass().add("weather-icon");
-            Label temp = new Label(Math.round(h.temp) + "°");
-            temp.getStyleClass().add("card-sub");
-            cell.getChildren().addAll(t, icon, temp);
-            hours.getChildren().add(cell);
+    /** Próximas horas em grade (células legíveis): 6 colunas × linhas. */
+    private GridPane hoursGrid(WeatherData w) {
+        GridPane grid = new GridPane();
+        grid.setHgap(8);
+        grid.setVgap(8);
+        for (int i = 0; i < 6; i++) {
+            ColumnConstraints col = new ColumnConstraints();
+            col.setPrefWidth(92);
+            grid.getColumnConstraints().add(col);
         }
-        return hours;
+        for (int i = 0; i < w.hours.size(); i++) {
+            WeatherData.Hour h = w.hours.get(i);
+            grid.add(hourCell(h), i % 6, i / 6);
+        }
+        return grid;
+    }
+
+    private VBox hourCell(WeatherData.Hour h) {
+        VBox cell = new VBox(3);
+        cell.getStyleClass().add("hour-cell");
+        String hm = LocalTime.ofInstant(java.time.Instant.ofEpochMilli(h.time),
+                java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"));
+        Label t = new Label(hm);
+        t.getStyleClass().add("section-label");
+        Label icon = new Label(WeatherData.icon(h.code));
+        icon.getStyleClass().add("weather-icon");
+        Label temp = new Label(Math.round(h.temp) + "°");
+        temp.getStyleClass().add("card-sub");
+        cell.getChildren().addAll(t, icon, temp);
+        return cell;
     }
 
     private HBox daysRow(WeatherData w) {
