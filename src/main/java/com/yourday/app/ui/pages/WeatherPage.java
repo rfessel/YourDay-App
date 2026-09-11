@@ -14,6 +14,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -82,18 +83,28 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
         HBox comboRow = new HBox(8, cityLbl, cityCombo);
         comboRow.setAlignment(Pos.CENTER_LEFT);
 
-        // Centro rolável: cabeçalho + status + cartões
+        // Centro rolável: cabeçalho + status + cartões.
+        // Os cartões esticam com a largura da janela; se a janela ficar menor
+        // que a largura mínima dos cartões, surge uma barra de rolagem embaixo.
         VBox body = new VBox(10);
-        body.getChildren().addAll(header, status, nowBox, hoursBox, daysBox);
-        setCenter(Ui.scroll(body));
+        body.getChildren().addAll(fill(header), status, nowBox, hoursBox, daysBox);
+        ScrollPane innerScroll = Ui.scroll(fill(body));
+        innerScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        setCenter(innerScroll);
 
         // Rodapé fixo na parte inferior (como no widget): outras cidades e,
         // na última linha, o seletor de cidade.
         Label others = Ui.sectionTitle("Outras cidades");
-        VBox footer = new VBox(6);
+        VBox footer = fill(new VBox(6));
         footer.getStyleClass().add("page-footer");
-        footer.getChildren().addAll(others, extrasBox, comboRow);
+        footer.getChildren().addAll(others, extrasBox, fill(comboRow));
         setBottom(footer);
+    }
+
+    /** Permite que o elemento estique lateralmente até a largura disponível. */
+    private static <T extends Region> T fill(T node) {
+        node.setMaxWidth(Double.MAX_VALUE);
+        return node;
     }
 
     // ---------------- Seleção de cidade ----------------
@@ -233,12 +244,12 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
         if (w == null) {
             return;
         }
-        nowBox.getChildren().add(Ui.card(nowHeader(w), nowExtra(w)));
-        VBox hoursCard = new VBox(6);
+        nowBox.getChildren().add(fill(Ui.card(nowHeader(w), nowExtra(w))));
+        VBox hoursCard = fill(new VBox(6));
         hoursCard.getStyleClass().add("card");
         hoursCard.getChildren().addAll(Ui.sectionTitle("Próximas horas"), chartLegend(), hoursChart(w));
         hoursBox.getChildren().add(hoursCard);
-        daysBox.getChildren().add(Ui.card(Ui.sectionTitle("Previsão da semana"), daysRow(w)));
+        daysBox.getChildren().add(fill(Ui.card(Ui.sectionTitle("Previsão da semana"), daysRow(w))));
     }
 
     private void renderExtras() {
@@ -266,7 +277,7 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
 
     /** Cartão compacto de uma outra cidade. */
     private HBox extraRow(String name, WeatherData w) {
-        HBox row = new HBox(10);
+        HBox row = fill(new HBox(10));
         row.getStyleClass().add("card");
         row.setAlignment(Pos.CENTER_LEFT);
         Label nm = new Label(name);
@@ -313,7 +324,7 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
      * e chance de chuva (vermelha, 0..100%), como no widget KDE.
      */
     private StackPane hoursChart(WeatherData w) {
-        StackPane pane = new StackPane();
+        StackPane pane = fill(new StackPane());
         Canvas cv = new Canvas();
         cv.setHeight(130);
         pane.getChildren().add(cv);
@@ -445,11 +456,13 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
     }
 
     private HBox daysRow(WeatherData w) {
-        HBox days = new HBox(6);
+        HBox days = fill(new HBox(6));
         for (WeatherData.Day d : w.days) {
             VBox cell = new VBox(4);
             cell.getStyleClass().add("day-cell");
+            cell.setMinWidth(84);
             HBox.setHgrow(cell, Priority.ALWAYS);
+            cell.setMaxWidth(Double.MAX_VALUE);
             String dayName = d.date.equals(java.time.LocalDate.now()) ? "Hoje"
                     : d.date.getDayOfWeek().getDisplayName(
                             java.time.format.TextStyle.SHORT, Locale.getDefault());
@@ -468,7 +481,7 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
     }
 
     private HBox nowHeader(WeatherData w) {
-        HBox row = new HBox(18);
+        HBox row = fill(new HBox(18));
         row.setAlignment(Pos.CENTER_LEFT);
         Label icon = new Label(WeatherData.icon(w.now.code));
         icon.getStyleClass().add("weather-icon-big");
@@ -484,7 +497,7 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
     }
 
     private HBox nowExtra(WeatherData w) {
-        HBox row = new HBox(18);
+        HBox row = fill(new HBox(18));
         row.setAlignment(Pos.CENTER_LEFT);
         VBox[] stats = {
                 stat("Sensação", Math.round(w.now.feelsLike) + "°"),
@@ -492,7 +505,7 @@ public class WeatherPage extends BorderPane implements MainView.Refreshable {
                 stat("Vento", Math.round(w.now.windKmh) + " km/h"),
                 stat("Chuva", w.now.precipitation + " mm")};
         for (VBox s : stats) {
-            HBox wrapper = new HBox(s);
+            HBox wrapper = fill(new HBox(s));
             HBox.setHgrow(wrapper, Priority.ALWAYS);
             row.getChildren().add(wrapper);
         }

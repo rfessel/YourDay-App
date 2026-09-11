@@ -56,8 +56,8 @@ public class YourDayApp extends Application {
         scene.getStylesheets().setAll(themeUrl(agenda.config().theme));
 
         stage.setTitle("Your Day");
-        stage.setMinWidth(820);
-        stage.setMinHeight(600);
+        stage.setMinWidth(560);
+        stage.setMinHeight(420);
         stage.setScene(scene);
         stage.show();
 
