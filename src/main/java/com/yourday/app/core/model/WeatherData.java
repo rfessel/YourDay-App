@@ -23,6 +23,7 @@ public class WeatherData {
         public long time;
         public double temp;
         public int code;
+        public int precipProb;
     }
 
     public static class Day {

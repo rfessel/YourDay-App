@@ -9,19 +9,23 @@ import com.yourday.app.ui.Ui;
 import com.yourday.app.ui.UiContext;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
-import javafx.scene.layout.ColumnConstraints;
-import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.text.Font;
+import javafx.scene.text.TextAlignment;
 
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -223,7 +227,10 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             return;
         }
         nowBox.getChildren().add(Ui.card(nowHeader(w), nowExtra(w)));
-        hoursBox.getChildren().add(Ui.card(Ui.sectionTitle("Próximas horas"), hoursGrid(w)));
+        VBox hoursCard = new VBox(6);
+        hoursCard.getStyleClass().add("card");
+        hoursCard.getChildren().addAll(Ui.sectionTitle("Próximas horas"), chartLegend(), hoursChart(w));
+        hoursBox.getChildren().add(hoursCard);
         daysBox.getChildren().add(Ui.card(Ui.sectionTitle("Previsão da semana"), daysRow(w)));
     }
 
@@ -271,36 +278,163 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         return row;
     }
 
-    /** Próximas horas em grade (células legíveis): 6 colunas × linhas. */
-    private GridPane hoursGrid(WeatherData w) {
-        GridPane grid = new GridPane();
-        grid.setHgap(8);
-        grid.setVgap(8);
-        for (int i = 0; i < 6; i++) {
-            ColumnConstraints col = new ColumnConstraints();
-            col.setPrefWidth(92);
-            grid.getColumnConstraints().add(col);
-        }
-        for (int i = 0; i < w.hours.size(); i++) {
-            WeatherData.Hour h = w.hours.get(i);
-            grid.add(hourCell(h), i % 6, i / 6);
-        }
-        return grid;
+    /** Legenda: linha azul (temperatura) e linha vermelha (chuva), como no widget. */
+    private VBox chartLegend() {
+        VBox legend = new VBox(4);
+        legend.getChildren().addAll(legendItem(CHART_TEMP, "Temperatura"), legendItem(CHART_RAIN, "Chuva"));
+        return legend;
     }
 
-    private VBox hourCell(WeatherData.Hour h) {
-        VBox cell = new VBox(3);
-        cell.getStyleClass().add("hour-cell");
-        String hm = LocalTime.ofInstant(java.time.Instant.ofEpochMilli(h.time),
-                java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"));
-        Label t = new Label(hm);
-        t.getStyleClass().add("section-label");
-        Label icon = new Label(WeatherData.icon(h.code));
-        icon.getStyleClass().add("weather-icon");
-        Label temp = new Label(Math.round(h.temp) + "°");
-        temp.getStyleClass().add("card-sub");
-        cell.getChildren().addAll(t, icon, temp);
-        return cell;
+    private static final Color CHART_TEMP = Color.rgb(64, 140, 242);
+    private static final Color CHART_RAIN = Color.rgb(230, 64, 64);
+
+    private HBox legendItem(Color color, String text) {
+        HBox row = new HBox(4);
+        row.setAlignment(Pos.CENTER_LEFT);
+        Rectangle bar = new Rectangle(14, 3);
+        bar.setArcWidth(4);
+        bar.setArcHeight(4);
+        bar.setFill(color);
+        Label l = new Label(text);
+        l.getStyleClass().add("section-label");
+        row.getChildren().addAll(bar, l);
+        return row;
+    }
+
+    /**
+     * Gráfico das próximas horas em duas linhas: temperatura (azul, escala própria)
+     * e chance de chuva (vermelha, 0..100%), como no widget KDE.
+     */
+    private StackPane hoursChart(WeatherData w) {
+        StackPane pane = new StackPane();
+        Canvas cv = new Canvas();
+        cv.setHeight(130);
+        pane.getChildren().add(cv);
+        pane.widthProperty().addListener((o, ov, nv) -> drawHoursChart(cv, pane, w));
+        pane.layoutBoundsProperty().addListener((o, ov, nv) -> drawHoursChart(cv, pane, w));
+        Platform.runLater(() -> drawHoursChart(cv, pane, w));
+        return pane;
+    }
+
+    private static final int CHART_TOP = 18;
+    private static final int CHART_BOTTOM = 18;
+    private static final int CHART_LEFT = 6;
+    private static final int CHART_RIGHT = 10;
+
+    private static double xFor(int i, int n, double plotW) {
+        return CHART_LEFT + (n > 1 ? i * plotW / (n - 1) : plotW / 2);
+    }
+
+    private static double yFor(double t, double tmin, double tmax, double plotH) {
+        return CHART_TOP + (1 - (t - tmin) / (tmax - tmin)) * plotH;
+    }
+
+    private static double yRain(double v, double plotH) {
+        return CHART_TOP + (1 - Math.max(0, Math.min(100, v)) / 100) * plotH;
+    }
+
+    private void drawHoursChart(Canvas cv, StackPane pane, WeatherData w) {
+        double padX = 6;
+        double wdt = pane.getWidth() - padX * 2;
+        if (wdt <= 0) {
+            return;
+        }
+        cv.setWidth(wdt);
+        GraphicsContext g = cv.getGraphicsContext2D();
+        g.clearRect(0, 0, cv.getWidth(), cv.getHeight());
+
+        List<WeatherData.Hour> pts = w.hours.size() > 6 ? w.hours.subList(0, 6) : w.hours;
+        int n = pts.size();
+        if (n < 2) {
+            return;
+        }
+        boolean dark = !"light".equals(ctx.agenda().config().theme);
+        double cw = cv.getWidth();
+        double plotW = cw - CHART_LEFT - CHART_RIGHT;
+        double plotH = cv.getHeight() - CHART_TOP - CHART_BOTTOM;
+
+        double tmin = Double.POSITIVE_INFINITY;
+        double tmax = Double.NEGATIVE_INFINITY;
+        for (WeatherData.Hour h : pts) {
+            tmin = Math.min(tmin, h.temp);
+            tmax = Math.max(tmax, h.temp);
+        }
+        if (!Double.isFinite(tmin) || !Double.isFinite(tmax)) {
+            tmin = 0;
+            tmax = 1;
+        }
+        if (tmax - tmin < 4) {
+            double pad = (4 - (tmax - tmin)) / 2;
+            tmin -= pad;
+            tmax += pad;
+        }
+
+        Color text = dark ? Color.rgb(237, 237, 237) : Color.rgb(33, 33, 33);
+        Color grid = dark ? Color.rgb(255, 255, 255, 0.07) : Color.rgb(0, 0, 0, 0.07);
+
+        g.setStroke(grid);
+        g.setLineWidth(1);
+        for (int gi = 0; gi <= 2; gi++) {
+            double gy = CHART_TOP + gi * plotH / 2;
+            g.strokeLine(CHART_LEFT, gy, CHART_LEFT + plotW, gy);
+        }
+
+        g.setStroke(CHART_RAIN);
+        g.setLineWidth(3);
+        g.beginPath();
+        for (int i = 0; i < n; i++) {
+            double y = yRain(pts.get(i).precipProb, plotH);
+            if (i == 0) {
+                g.moveTo(xFor(i, n, plotW), y);
+            } else {
+                g.lineTo(xFor(i, n, plotW), y);
+            }
+        }
+        g.stroke();
+        g.setLineWidth(2);
+
+        g.setStroke(CHART_TEMP);
+        g.setLineWidth(2);
+        g.beginPath();
+        for (int i = 0; i < n; i++) {
+            double y = yFor(pts.get(i).temp, tmin, tmax, plotH);
+            if (i == 0) {
+                g.moveTo(xFor(i, n, plotW), y);
+            } else {
+                g.lineTo(xFor(i, n, plotW), y);
+            }
+        }
+        g.stroke();
+
+        g.setFont(Font.font(9));
+        g.setTextAlign(TextAlignment.CENTER);
+        double bottomY = cv.getHeight() - 5;
+        for (int i = 0; i < n; i++) {
+            WeatherData.Hour h = pts.get(i);
+            double dx = xFor(i, n, plotW);
+            double dy = yFor(h.temp, tmin, tmax, plotH);
+            double dyR = yRain(h.precipProb, plotH);
+
+            g.setFill(CHART_RAIN);
+            g.fillOval(dx - 2, dyR - 2, 4, 4);
+            g.setFill(CHART_TEMP);
+            g.fillOval(dx - 3, dy - 3, 6, 6);
+
+            g.setFill(text);
+            g.fillText(Math.round(h.temp) + "°", dx, dy - 8);
+            if (h.precipProb > 0) {
+                g.setFill(CHART_RAIN);
+                double pyl = dyR + 11;
+                if (pyl > bottomY - 4) {
+                    pyl = dyR - 9;
+                }
+                g.fillText(Math.round(h.precipProb) + "%", dx, pyl);
+            }
+            g.setFill(text);
+            int hour = LocalTime.ofInstant(java.time.Instant.ofEpochMilli(h.time),
+                    java.time.ZoneId.systemDefault()).getHour();
+            g.fillText(hour + "h", dx, bottomY);
+        }
     }
 
     private HBox daysRow(WeatherData w) {

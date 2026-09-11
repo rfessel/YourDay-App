@@ -24,7 +24,7 @@ public final class WeatherService {
             "https://api.open-meteo.com/v1/forecast"
                     + "?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,"
                     + "apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m"
-                    + "&hourly=temperature_2m,weather_code&forecast_hours=24"
+                    + "&hourly=temperature_2m,weather_code,precipitation_probability&forecast_hours=24"
                     + "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
                     + "precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=7"
                     + "&temperature_unit=celsius&wind_speed_unit=kmh&precipitation_unit=mm";
@@ -136,11 +136,13 @@ public final class WeatherService {
             JsonArray times = hourly.getAsJsonArray("time");
             JsonArray temps = hourly.getAsJsonArray("temperature_2m");
             JsonArray codes = hourly.getAsJsonArray("weather_code");
+            JsonArray probs = hourly.getAsJsonArray("precipitation_probability");
             for (int i = 0; i < times.size(); i++) {
                 WeatherData.Hour h = new WeatherData.Hour();
                 h.time = toEpochMillis(times.get(i).getAsString(), offset);
                 h.temp = temps.get(i).getAsDouble();
                 h.code = codes.get(i).getAsInt();
+                h.precipProb = probs != null && i < probs.size() ? probs.get(i).getAsInt() : 0;
                 w.hours.add(h);
             }
         }
