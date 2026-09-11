@@ -10,8 +10,11 @@ import com.yourday.app.ui.UiContext;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Tooltip;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -19,22 +22,33 @@ import javafx.scene.layout.VBox;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
-/** Clima: cidade atual (principal + complementares) + horária + previsão de 7 dias. */
+/** Clima: seletor de cidade no rodapé (fixo) + cards roláveis + cidades complementares. */
 public class WeatherPage extends VBox implements MainView.Refreshable {
+
+    private static final long FETCH_COOLDOWN_MS = 15 * 60_000L;
 
     private final UiContext ctx;
     private final Label status = new Label();
+
     private final VBox nowBox = new VBox(8);
-    private final VBox extrasBox = new VBox(8);
     private final VBox hoursBox = new VBox(8);
     private final VBox daysBox = new VBox(8);
-    private long lastFetch;
+    private final VBox extrasBox = new VBox(4);
+    private final ComboBox<String> cityCombo = new ComboBox<>();
+
+    private String currentCity;
+    private final Map<String, WeatherData> cache = new LinkedHashMap<>();
+    private final Map<String, Long> fetchedAt = new LinkedHashMap<>();
 
     public WeatherPage(UiContext ctx) {
         this.ctx = ctx;
-        setSpacing(12);
+        setSpacing(10);
         getStyleClass().add("content");
 
         Label title = new Label("Clima");
@@ -44,11 +58,8 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
 
         Button reloadBtn = new Button("↻");
         reloadBtn.getStyleClass().add("toolbtn");
-        reloadBtn.setTooltip(new javafx.scene.control.Tooltip("Atualizar previsão"));
-        reloadBtn.setOnAction(e -> {
-            lastFetch = 0;
-            refresh();
-        });
+        reloadBtn.setTooltip(new Tooltip("Atualizar previsão"));
+        reloadBtn.setOnAction(e -> refresh(true));
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -58,89 +69,228 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
 
         status.getStyleClass().add("section-label");
 
-        getChildren().addAll(header, status, nowBox, extrasBox, hoursBox, daysBox);
+        // Área rolável com os cards (principal, horas, semana)
+        VBox content = new VBox(12, nowBox, hoursBox, daysBox);
+        ScrollPane scroll = new ScrollPane(content);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scroll.setStyle("-fx-background-color: transparent;");
+        scroll.setMinHeight(0);
+        scroll.setPrefHeight(1);
+        VBox.setVgrow(scroll, Priority.ALWAYS);
+
+        // Rodapé fixo: seletor de cidade + cidades complementares
+        cityCombo.getStyleClass().add("field");
+        cityCombo.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(cityCombo, Priority.ALWAYS);
+        cityCombo.setOnAction(e -> onCitySelected());
+
+        Label cityLbl = new Label("Cidade:");
+        cityLbl.getStyleClass().add("section-label");
+        HBox comboRow = new HBox(8, cityLbl, cityCombo);
+        comboRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label others = Ui.sectionTitle("Outras cidades");
+        VBox footer = new VBox(8, comboRow, others, extrasBox);
+
+        getChildren().addAll(header, status, scroll, footer);
     }
 
-    @Override
-    public void refresh() {
-        long since = System.currentTimeMillis() - lastFetch;
-        if (lastFetch == 0 || since > 30 * 60_000L) {
-            AppConfig cfg = ctx.agenda().config();
-            doFetch(cfg.cityLat, cfg.cityLon, cfg.cityName);
+    // ---------------- Seleção de cidade ----------------
+
+    private List<String> cityNames() {
+        List<String> out = new ArrayList<>();
+        AppConfig cfg = ctx.agenda().config();
+        if (cfg.cityName != null && !cfg.cityName.isBlank()) {
+            out.add(cfg.cityName);
         }
+        if (cfg.extraCities != null) {
+            for (AppConfig.ExtraCity ec : cfg.extraCities) {
+                if (!out.contains(ec.name)) {
+                    out.add(ec.name);
+                }
+            }
+        }
+        return out;
+    }
+
+    private double[] coordsOf(String name) {
+        AppConfig cfg = ctx.agenda().config();
+        if (name != null && name.equals(cfg.cityName)) {
+            return cfg.cityLat != null && cfg.cityLon != null
+                    ? new double[]{cfg.cityLat, cfg.cityLon} : null;
+        }
+        if (cfg.extraCities != null) {
+            for (AppConfig.ExtraCity ec : cfg.extraCities) {
+                if (ec.name.equals(name)) {
+                    return new double[]{ec.lat, ec.lon};
+                }
+            }
+        }
+        return null;
+    }
+
+    private void onCitySelected() {
+        String sel = cityCombo.getValue();
+        if (sel == null || sel.equals(currentCity)) {
+            return;
+        }
+        currentCity = sel;
+        reorderCombo(sel);
+        ensureData(sel, false);
+        renderAll();
         renderExtras();
     }
 
-    private void doFetch(Double lat, Double lon, String cityName) {
-        if (lat == null || lon == null) {
-            status.setText("Configure sua cidade na busca acima.");
+    /** Coloca a cidade exibida como primeira opção do dropdown. */
+    private void reorderCombo(String selected) {
+        List<String> names = cityNames();
+        names.remove(selected);
+        List<String> ordered = new ArrayList<>();
+        ordered.add(selected);
+        ordered.addAll(names);
+        cityCombo.getItems().setAll(ordered);
+        cityCombo.setValue(selected);
+    }
+
+    // ---------------- Busca de dados ----------------
+
+    @Override
+    public void refresh() {
+        refresh(false);
+    }
+
+    private void refresh(boolean force) {
+        AppConfig cfg = ctx.agenda().config();
+        List<String> names = cityNames();
+        if (currentCity == null || !names.contains(currentCity)) {
+            currentCity = cfg.cityName != null && !cfg.cityName.isBlank()
+                    ? cfg.cityName : (names.isEmpty() ? null : names.get(0));
+        }
+        if (currentCity == null) {
+            status.setText("Nenhuma cidade configurada. Vá em Configurações → Clima.");
             return;
         }
-        status.setText("Carregando previsão…");
-        HttpSupport.getAsync(WeatherService.forecastUrl(lat, lon), s -> {
+        reorderCombo(currentCity);
+        if (force) {
+            fetchedAt.clear();
+        }
+        for (String name : names) {
+            ensureData(name, force);
+        }
+        renderAll();
+        renderExtras();
+    }
+
+    private void ensureData(String name, boolean force) {
+        if (coordsOf(name) == null) {
+            return;
+        }
+        long last = fetchedAt.getOrDefault(name, 0L);
+        if (!force && cache.containsKey(name)
+                && System.currentTimeMillis() - last < FETCH_COOLDOWN_MS) {
+            return;
+        }
+        doFetch(name);
+    }
+
+    private void doFetch(String name) {
+        double[] c = coordsOf(name);
+        if (c == null) {
+            status.setText("Configure sua cidade em Configurações → Clima.");
+            return;
+        }
+        status.setText("Carregando previsão de " + name + "…");
+        HttpSupport.getAsync(WeatherService.forecastUrl(c[0], c[1]), s -> {
             try {
-                WeatherData w = WeatherService.parseForecast(s, cityName);
-                Platform.runLater(() -> show(w));
+                WeatherData w = WeatherService.parseForecast(s, name);
+                Platform.runLater(() -> {
+                    cache.put(name, w);
+                    fetchedAt.put(name, System.currentTimeMillis());
+                    status.setText("");
+                    if (name.equals(currentCity)) {
+                        renderAll();
+                    }
+                    renderExtras();
+                });
             } catch (Exception e) {
                 Platform.runLater(() -> status.setText("Erro ao carregar a previsão."));
             }
         }, e -> Platform.runLater(() -> status.setText("Erro na rede: " + e.getMessage())));
-        lastFetch = System.currentTimeMillis();
     }
 
-    private void show(WeatherData w) {
-        status.setText("");
-        nowBox.getChildren().setAll(Ui.card(nowHeader(w), nowExtra(w)));
-        hoursBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Próximas 24 horas"),
-                hoursRow(w)));
-        daysBox.getChildren().setAll(Ui.card(Ui.sectionTitle("Previsão da semana"),
-                daysRow(w)));
-        renderExtras();
+    // ---------------- Renderização ----------------
+
+    private WeatherData currentData() {
+        return cache.get(currentCity);
+    }
+
+    private void renderAll() {
+        WeatherData w = currentData();
+        nowBox.getChildren().clear();
+        hoursBox.getChildren().clear();
+        daysBox.getChildren().clear();
+        if (w == null) {
+            return;
+        }
+        nowBox.getChildren().add(Ui.card(nowHeader(w), nowExtra(w)));
+        hoursBox.getChildren().add(Ui.card(Ui.sectionTitle("Próximas horas"), hoursRow(w)));
+        daysBox.getChildren().add(Ui.card(Ui.sectionTitle("Previsão da semana"), daysRow(w)));
     }
 
     private void renderExtras() {
-        AppConfig cfg = ctx.agenda().config();
         extrasBox.getChildren().clear();
-        if (cfg.extraCities == null || cfg.extraCities.isEmpty()) {
+        List<String> others = new ArrayList<>();
+        for (String name : cityNames()) {
+            if (!name.equals(currentCity)) {
+                others.add(name);
+            }
+        }
+        if (others.isEmpty()) {
+            Label none = new Label("Nenhuma outra cidade configurada.");
+            none.getStyleClass().add("section-label");
+            extrasBox.getChildren().add(none);
             return;
         }
-        VBox card = Ui.card(Ui.sectionTitle("Cidades complementares"));
-        for (AppConfig.ExtraCity ec : cfg.extraCities) {
-            HBox row = new HBox(10);
-            row.setAlignment(Pos.CENTER_LEFT);
-            Label name = new Label(ec.name);
-            name.getStyleClass().add("card-sub");
-            Label icon = new Label("…");
-            icon.getStyleClass().add("weather-icon");
-            Label temp = new Label("—");
-            temp.getStyleClass().add("card-sub");
-            HBox.setHgrow(name, Priority.ALWAYS);
-            row.getChildren().addAll(name, icon, temp);
-            card.getChildren().add(row);
-            final HBox r = row;
-            HttpSupport.getAsync(WeatherService.forecastUrl(ec.lat, ec.lon), s -> {
-                try {
-                    WeatherData w = WeatherService.parseForecast(s, ec.name);
-                    Platform.runLater(() -> {
-                        ((Label) r.getChildren().get(1)).setText(WeatherData.icon(w.now.code));
-                        ((Label) r.getChildren().get(2)).setText(Math.round(w.now.temp) + "° · "
-                                + WeatherData.condition(w.now.code));
-                    });
-                } catch (Exception ignored) {
-                    Platform.runLater(() ->
-                            ((Label) r.getChildren().get(2)).setText("—"));
-                }
-            }, e -> Platform.runLater(() ->
-                    ((Label) r.getChildren().get(2)).setText("—")));
+        for (String name : others) {
+            WeatherData w = cache.get(name);
+            extrasBox.getChildren().add(extraRow(name, w));
+            if (w == null) {
+                ensureData(name, false);
+            }
         }
-        extrasBox.getChildren().add(card);
     }
 
-    private ScrollPane hoursRow(WeatherData w) {
-        HBox hours = new HBox(6);
+    /** Cartão compacto de uma outra cidade (rodapé fixo). */
+    private HBox extraRow(String name, WeatherData w) {
+        HBox row = new HBox(10);
+        row.getStyleClass().add("card");
+        row.setAlignment(Pos.CENTER_LEFT);
+        Label nm = new Label(name);
+        nm.getStyleClass().add("card-sub");
+        HBox.setHgrow(nm, Priority.ALWAYS);
+        Label icon = new Label(w != null ? WeatherData.icon(w.now.code) : "…");
+        icon.getStyleClass().add("weather-icon");
+        Label temp = new Label(w != null ? Math.round(w.now.temp) + "°" : "—");
+        temp.getStyleClass().add("weather-now");
+        Label cond = new Label(w != null ? WeatherData.condition(w.now.code) : "carregando…");
+        cond.getStyleClass().add("section-label");
+        Label range = new Label(w != null && !w.days.isEmpty() ? "Máx " + Math.round(w.days.get(0).max)
+                + "° · Mín " + Math.round(w.days.get(0).min) + "°" : "");
+        range.getStyleClass().add("section-label");
+        row.getChildren().addAll(nm, icon, temp, cond, range);
+        return row;
+    }
+
+    private FlowPane hoursRow(WeatherData w) {
+        FlowPane hours = new FlowPane(8, 10);
+        hours.setPrefWrapLength(Double.MAX_VALUE);
         for (WeatherData.Hour h : w.hours) {
             VBox cell = new VBox(3);
             cell.getStyleClass().add("hour-cell");
+            cell.setMinWidth(92);
+            cell.setPrefWidth(92);
             String hm = LocalTime.ofInstant(java.time.Instant.ofEpochMilli(h.time),
                     java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"));
             Label t = new Label(hm);
@@ -148,17 +298,11 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
             Label icon = new Label(WeatherData.icon(h.code));
             icon.getStyleClass().add("weather-icon");
             Label temp = new Label(Math.round(h.temp) + "°");
-            temp.getStyleClass().add("section-label");
+            temp.getStyleClass().add("card-sub");
             cell.getChildren().addAll(t, icon, temp);
             hours.getChildren().add(cell);
         }
-        ScrollPane hs = new ScrollPane(hours);
-        hs.setFitToHeight(true);
-        hs.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        hs.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        hs.setStyle("-fx-background-color: transparent;");
-        hs.setMaxHeight(130);
-        return hs;
+        return hours;
     }
 
     private HBox daysRow(WeatherData w) {
