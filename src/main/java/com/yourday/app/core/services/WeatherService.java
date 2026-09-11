@@ -115,6 +115,11 @@ public final class WeatherService {
         w.cityName = cityName;
         w.fetchedAt = System.currentTimeMillis();
 
+        java.time.ZoneOffset offset = java.time.ZoneOffset.UTC;
+        if (root.has("utc_offset_seconds") && !root.get("utc_offset_seconds").isJsonNull()) {
+            offset = java.time.ZoneOffset.ofTotalSeconds(root.get("utc_offset_seconds").getAsInt());
+        }
+
         JsonObject current = root.getAsJsonObject("current");
         if (current != null) {
             w.now.temp = num(current, "temperature_2m");
@@ -133,7 +138,7 @@ public final class WeatherService {
             JsonArray codes = hourly.getAsJsonArray("weather_code");
             for (int i = 0; i < times.size(); i++) {
                 WeatherData.Hour h = new WeatherData.Hour();
-                h.time = Instant.parse(times.get(i).getAsString()).toEpochMilli();
+                h.time = toEpochMillis(times.get(i).getAsString(), offset);
                 h.temp = temps.get(i).getAsDouble();
                 h.code = codes.get(i).getAsInt();
                 w.hours.add(h);
@@ -163,11 +168,6 @@ public final class WeatherService {
             }
         }
 
-        ZoneId zone = ZoneId.systemDefault();
-        JsonObject utcOffset = root.getAsJsonObject("utc_offset_seconds");
-        if (utcOffset != null) {
-            // tempo atual da API (já em instantes absolutos); não precisa do offset
-        }
         return w;
     }
 
@@ -176,11 +176,20 @@ public final class WeatherService {
         return e == null || e.isJsonNull() ? 0 : e.getAsDouble();
     }
 
+    /** Horas da API vêm no fuso do local (sem offset); converte com o offset retornado. */
+    private static long toEpochMillis(String iso, java.time.ZoneOffset off) {
+        return java.time.LocalDateTime.parse(iso).toEpochSecond(off) * 1000;
+    }
+
     private static String timeHm(JsonArray arr, int i) {
         if (arr == null || i >= arr.size() || arr.get(i) == null) {
             return "";
         }
-        Instant in = Instant.parse(arr.get(i).getAsString());
-        return in.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"));
+        try {
+            return java.time.LocalDateTime.parse(arr.get(i).getAsString())
+                    .format(DateTimeFormatter.ofPattern("HH:mm"));
+        } catch (Exception e) {
+            return "";
+        }
     }
 }

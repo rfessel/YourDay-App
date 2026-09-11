@@ -12,9 +12,9 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.time.LocalTime;
@@ -25,7 +25,6 @@ import java.util.Locale;
 public class WeatherPage extends VBox implements MainView.Refreshable {
 
     private final UiContext ctx;
-    private final TextField searchField = new TextField();
     private final Label status = new Label();
     private final VBox nowBox = new VBox(8);
     private final VBox extrasBox = new VBox(8);
@@ -43,96 +42,23 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         Label sub = new Label("Previsão por hora e por dia");
         sub.getStyleClass().add("section-label");
 
-        AppConfig cfg = ctx.agenda().config();
-        searchField.setPromptText("Buscar cidade (ex.: Curitiba)");
-        searchField.setText(cfg.cityName);
-        searchField.getStyleClass().add("field");
-        HBox.setHgrow(searchField, Priority.ALWAYS);
-
-        Button searchBtn = new Button("Buscar");
-        searchBtn.getStyleClass().add("ghost-btn");
-        searchBtn.setOnAction(e -> geocodeAndFetch(searchField.getText().trim()));
-
-        Button geoBtn = new Button("Minha localização");
-        geoBtn.getStyleClass().add("ghost-btn");
-        geoBtn.setOnAction(e -> locateByIp());
-
         Button reloadBtn = new Button("↻");
         reloadBtn.getStyleClass().add("toolbtn");
-        reloadBtn.setOnAction(e -> refresh());
+        reloadBtn.setTooltip(new javafx.scene.control.Tooltip("Atualizar previsão"));
+        reloadBtn.setOnAction(e -> {
+            lastFetch = 0;
+            refresh();
+        });
 
-        HBox searchRow = new HBox(8, searchField, searchBtn, geoBtn, reloadBtn);
-        searchRow.setAlignment(Pos.CENTER_LEFT);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        VBox titles = new VBox(2, title, sub);
+        HBox header = new HBox(10, titles, spacer, reloadBtn);
+        header.setAlignment(Pos.CENTER_LEFT);
 
         status.getStyleClass().add("section-label");
 
-        getChildren().addAll(title, sub, searchRow, status, nowBox, extrasBox, hoursBox, daysBox);
-    }
-
-    private void locateByIp() {
-        status.setText("Obtendo localização…");
-        HttpSupport.getAsync("https://ip-api.com/json/?fields=status,message,lat,lon,city,regionName&lang=pt",
-                s -> {
-                    try {
-                        var json = com.google.gson.JsonParser.parseString(s).getAsJsonObject();
-                        if (!"success".equals(json.get("status").getAsString())) {
-                            Platform.runLater(() -> status.setText("GeoIP falhou: " + json.get("message").getAsString()));
-                            return;
-                        }
-                        String city = json.get("city").getAsString();
-                        String region = json.has("regionName") ? json.get("regionName").getAsString() : "";
-                        String name = region == null || region.isBlank() ? city : city + ", " + region;
-                        double lat = json.get("lat").getAsDouble();
-                        double lon = json.get("lon").getAsDouble();
-                        AppConfig cfg = ctx.agenda().config();
-                        cfg.cityName = name;
-                        cfg.cityLat = lat;
-                        cfg.cityLon = lon;
-                        ctx.agenda().saveConfig();
-                        searchField.setText(name);
-                        Platform.runLater(() -> doFetch(lat, lon, name));
-                    } catch (Exception e) {
-                        Platform.runLater(() -> status.setText("Erro na localização: " + e.getMessage()));
-                    }
-                },
-                e -> Platform.runLater(() -> status.setText("Erro na localização: " + e.getMessage())));
-    }
-
-    private void geocodeAndFetch(String city) {
-        if (city == null || city.isBlank()) {
-            return;
-        }
-        status.setText("Buscando " + city + "…");
-        HttpSupport.getAsync(
-                "https://geocoding-api.open-meteo.com/v1/search?name="
-                        + java.net.URLEncoder.encode(city, java.nio.charset.StandardCharsets.UTF_8)
-                        + "&count=1&language=pt&format=json",
-                s -> {
-                    try {
-                        var json = com.google.gson.JsonParser.parseString(s).getAsJsonObject();
-                        var results = json.getAsJsonArray("results");
-                        if (results == null || results.isEmpty()) {
-                            Platform.runLater(() -> status.setText("Cidade não encontrada: " + city));
-                            return;
-                        }
-                        var first = results.get(0).getAsJsonObject();
-                        double lat = first.get("latitude").getAsDouble();
-                        double lon = first.get("longitude").getAsDouble();
-                        String baseName = first.get("name").getAsString();
-                        String finalName = first.has("admin1")
-                                ? baseName + ", " + first.get("admin1").getAsString() : baseName;
-                        AppConfig cfg = ctx.agenda().config();
-                        cfg.cityName = finalName;
-                        cfg.cityLat = lat;
-                        cfg.cityLon = lon;
-                        ctx.agenda().saveConfig();
-                        searchField.setText(finalName);
-                        Platform.runLater(() -> doFetch(lat, lon, finalName));
-                    } catch (Exception e) {
-                        Platform.runLater(() -> status.setText("Erro na busca da cidade."));
-                    }
-                },
-                e -> Platform.runLater(() -> status.setText("Erro na busca da cidade: " + e.getMessage())));
+        getChildren().addAll(header, status, nowBox, extrasBox, hoursBox, daysBox);
     }
 
     @Override
