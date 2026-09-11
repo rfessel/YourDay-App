@@ -112,6 +112,14 @@
     -fx-padding: 12;
     -fx-spacing: 8;
 }
+.page-footer {
+    -fx-background-color: yd-card-bg;
+    -fx-background-radius: 8;
+    -fx-border-color: yd-card-border;
+    -fx-border-radius: 8;
+    -fx-padding: 10 12 10 12;
+    -fx-spacing: 6;
+}
 .card-title {
     -fx-font-size: 14px;
     -fx-font-weight: bold;

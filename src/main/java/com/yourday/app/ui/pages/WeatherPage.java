@@ -15,6 +15,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -32,8 +33,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Clima: seletor de cidade + cards (principal, horas, semana) + cidades complementares. */
-public class WeatherPage extends VBox implements MainView.Refreshable {
+/** Clima: cards roláveis no centro + rodapé fixo (outras cidades e seletor). */
+public class WeatherPage extends BorderPane implements MainView.Refreshable {
 
     private static final long FETCH_COOLDOWN_MS = 15 * 60_000L;
 
@@ -51,7 +52,6 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
 
     public WeatherPage(UiContext ctx) {
         this.ctx = ctx;
-        setSpacing(10);
         getStyleClass().add("content");
 
         Label title = new Label("Clima");
@@ -74,19 +74,26 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
 
         // Seletor de cidade (item exibido primeiro, demais em seguida)
         cityCombo.setOnAction(e -> onCitySelected());
+        HBox.setHgrow(cityCombo, Priority.ALWAYS);
+        cityCombo.setMaxWidth(Double.MAX_VALUE);
 
         Label cityLbl = new Label("Cidade:");
         cityLbl.getStyleClass().add("section-label");
         HBox comboRow = new HBox(8, cityLbl, cityCombo);
         comboRow.setAlignment(Pos.CENTER_LEFT);
 
-        // Espaçador empurra rodapé (seletor + complementares) para o final da página
-        Region push = new Region();
-        VBox.setVgrow(push, Priority.ALWAYS);
+        // Centro rolável: cabeçalho + status + cartões
+        VBox body = new VBox(10);
+        body.getChildren().addAll(header, status, nowBox, hoursBox, daysBox);
+        setCenter(Ui.scroll(body));
 
+        // Rodapé fixo na parte inferior (como no widget): outras cidades e,
+        // na última linha, o seletor de cidade.
         Label others = Ui.sectionTitle("Outras cidades");
-
-        getChildren().addAll(header, status, nowBox, hoursBox, daysBox, push, comboRow, others, extrasBox);
+        VBox footer = new VBox(6);
+        footer.getStyleClass().add("page-footer");
+        footer.getChildren().addAll(others, extrasBox, comboRow);
+        setBottom(footer);
     }
 
     // ---------------- Seleção de cidade ----------------
@@ -442,6 +449,7 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
         for (WeatherData.Day d : w.days) {
             VBox cell = new VBox(4);
             cell.getStyleClass().add("day-cell");
+            HBox.setHgrow(cell, Priority.ALWAYS);
             String dayName = d.date.equals(java.time.LocalDate.now()) ? "Hoje"
                     : d.date.getDayOfWeek().getDisplayName(
                             java.time.format.TextStyle.SHORT, Locale.getDefault());
@@ -478,11 +486,16 @@ public class WeatherPage extends VBox implements MainView.Refreshable {
     private HBox nowExtra(WeatherData w) {
         HBox row = new HBox(18);
         row.setAlignment(Pos.CENTER_LEFT);
-        row.getChildren().addAll(
+        VBox[] stats = {
                 stat("Sensação", Math.round(w.now.feelsLike) + "°"),
                 stat("Umidade", w.now.humidity + "%"),
                 stat("Vento", Math.round(w.now.windKmh) + " km/h"),
-                stat("Chuva", w.now.precipitation + " mm"));
+                stat("Chuva", w.now.precipitation + " mm")};
+        for (VBox s : stats) {
+            HBox wrapper = new HBox(s);
+            HBox.setHgrow(wrapper, Priority.ALWAYS);
+            row.getChildren().add(wrapper);
+        }
         return row;
     }
 
